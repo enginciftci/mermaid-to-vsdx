@@ -1,11 +1,57 @@
 # Mermaid to Microsoft Visio (.vsdx) Converter
 ### Enterprise-Grade Native Headless Compiler & Desktop Application
 
-A robust, enterprise-grade tool that converts **Mermaid diagrams** (Flowcharts, Sequence diagrams, and UML Class diagrams) into professional, beautifully styled **Microsoft Visio (`.vsdx`)** vector drawings with **100% Turkish character fidelity**, automated visual verification screenshots, and dynamic connector routing.
+A robust, enterprise-grade tool that converts **Mermaid diagrams** (Flowcharts, Sequence diagrams, UML Class diagrams, Entity-Relationship diagrams, and State machines) into professional, beautifully styled **Microsoft Visio (`.vsdx`)** vector drawings with **100% Turkish character fidelity**, automated visual verification screenshots, and dynamic connector routing.
 
 Featuring a **Dual-Engine Architecture**:
 1. **Native Headless OPC Compiler Engine (`--engine native`, Default)**: Pure Python implementation that builds standard Open Packaging Conventions `.vsdx` ZIP packages directly without requiring Microsoft Visio or Windows COM Interop. Runs cross-platform on Windows, Linux, macOS, and in CI/CD containers.
 2. **Visio COM Automation Engine (`--engine com`)**: Direct automation of Microsoft Visio Desktop on Windows via `win32com.client` for interactive canvas manipulation and high-DPI verification screenshots (`--verify`).
+
+<p align="center">
+  <img src="assets/microservices_subgraphs.png" alt="Mermaid to Visio Microservices Architecture" width="100%">
+</p>
+
+---
+
+## 📸 Visual Showcase & Generated Visio Drawings
+
+Every diagram below is natively compiled into a real Microsoft Visio (`.vsdx`) drawing with parametric vector shapes, orthogonal dynamic connectors, and crisp Unicode typography:
+
+| Microservices Architecture (Subgraphs) | E-Commerce Workflow (Flowchart) |
+| :---: | :---: |
+| <img src="assets/microservices_subgraphs.png" width="420" alt="Microservices Architecture" /> | <img src="assets/flowchart_ecommerce.png" width="420" alt="E-Commerce Flowchart" /> |
+
+| UML Class Hierarchy | Entity-Relationship (ER) Model |
+| :---: | :---: |
+| <img src="assets/uml_class_diagram.png" width="420" alt="UML Class Diagram" /> | <img src="assets/er_diagram.png" width="420" alt="ER Diagram" /> |
+
+| State Machine Transition | Sequence Diagram |
+| :---: | :---: |
+| <img src="assets/state_diagram.png" width="420" alt="State Machine" /> | <img src="assets/sequence_diagram.png" width="420" alt="Sequence Diagram" /> |
+
+---
+
+## 🤖 AI Agent Skill Integration (`SKILL.md`)
+
+This repository is equipped with an **AI Agent Skill** formatted for autonomous agents (such as **Antigravity**, **Claude Code**, **Cursor**, **Copilot**, and **LangChain**).
+
+The complete agent instructions and protocol are available in:
+- **Root Specification**: [`SKILL.md`](SKILL.md)
+- **Modular Skill Folder**: [`skills/mermaid-to-visio/SKILL.md`](skills/mermaid-to-visio/SKILL.md)
+
+### What Agents Can Do:
+1. **Autonomous Diagram Ingestion**: Extract ```` ```mermaid ```` code blocks directly from markdown documentation.
+2. **Zero-Dependency Headless Compilation**: Run `--engine native` in any cloud container, Linux server, or local environment without Microsoft Office.
+3. **Agentic Visual Verification Loop**: When Visio is present, invoke `--verify` to render a 300-DPI PNG screenshot into `verification_output/` and inspect layout accuracy using image inspection tools before completing tasks.
+4. **Professional Themes & Fonts**: Select appropriate palettes (`Modern Corporate`, `Emerald Tech`, `Sunset Coral`, `Minimalist Slate`, `Grayscale Clean`) and TrueType fonts (`Segoe UI`, `Calibri`, `Arial`).
+
+```powershell
+# Headless compile from any agent environment
+python main.py diagram.mmd -o output/diagram.vsdx --engine native --palette "Modern Corporate (Blue & Slate)"
+
+# With visual verification (Windows + Visio)
+python main.py diagram.mmd -o output/diagram.vsdx --verify
+```
 
 ---
 
@@ -206,10 +252,15 @@ mermaid-to-vsdx/
 │   ├── test_turkish_encoding.py  # Turkish character encoding tests
 │   └── test_visio_generation.py  # Visio COM integration tests
 │
+├── assets/                       # High-resolution showcase diagram screenshots
+├── skills/                       # Modular AI Agent skill package
+│   └── mermaid-to-visio/
+│       └── SKILL.md
 ├── main.py                       # Application entrypoint (GUI + CLI)
 ├── run.bat                       # One-click Windows 11 launcher
 ├── run.ps1                       # PowerShell launcher
 ├── requirements.txt              # Pip dependencies
+├── SKILL.md                      # AI Agent Skill specification
 ├── LICENSE                       # MIT License
 └── README.md                     # Documentation
 ```
