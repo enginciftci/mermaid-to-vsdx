@@ -8,7 +8,7 @@ Featuring a **Dual-Engine Architecture**:
 2. **Visio COM Automation Engine (`--engine com`)**: Direct automation of Microsoft Visio Desktop on Windows via `win32com.client` for interactive canvas manipulation and high-DPI verification screenshots (`--verify`).
 
 <p align="center">
-  <img src="assets/microservices_subgraphs.png" alt="Mermaid to Visio Microservices Architecture" width="100%">
+  <img src="assets/screenshot.png" alt="Mermaid to Microsoft Visio Converter Application & Visual Verification" width="100%">
 </p>
 
 ---
