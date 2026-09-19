@@ -43,10 +43,13 @@ The complete agent instructions and protocol are available in:
 4. **Professional Themes & Fonts**: Select appropriate palettes (`Modern Corporate`, `Emerald Tech`, `Sunset Coral`, `Minimalist Slate`, `Grayscale Clean`) and TrueType fonts (`Segoe UI`, `Calibri`, `Arial`).
 
 ```powershell
-# Headless compile from any agent environment
-python main.py diagram.mmd -o output/diagram.vsdx --engine native --palette "Modern Corporate (Blue & Slate)"
+# Global CLI command (works anywhere after pip install)
+mermaid-to-vsdx diagram.mmd -o output/diagram.vsdx --engine native --palette "Modern Corporate (Blue & Slate)"
 
 # With visual verification (Windows + Visio)
+mermaid-to-vsdx diagram.mmd -o output/diagram.vsdx --verify
+
+# Or from cloned repository root:
 python main.py diagram.mmd -o output/diagram.vsdx --verify
 ```
 
@@ -102,26 +105,39 @@ python main.py diagram.mmd -o output/diagram.vsdx --verify
 
 ## 🚀 Quick Start
 
-### 1. Installation
+### Option A: Install Globally via Pip (Recommended for Agents & CLI)
 
-Clone or extract the repository, then install the dependencies:
+Install directly from GitHub to get the universal `mermaid-to-vsdx` command in your environment:
 
 ```powershell
-python -m pip install -r requirements.txt --trusted-host pypi.org --trusted-host files.pythonhosted.org
+pip install git+https://github.com/enginciftci/mermaid-to-vsdx.git
+```
+
+Now you can convert diagrams from **any directory**:
+```powershell
+mermaid-to-vsdx diagram.mmd -o output/diagram.vsdx
+```
+
+### Option B: Clone Repository & Run Desktop Application / CLI
+
+Clone the repository and install dependencies:
+
+```powershell
+git clone https://github.com/enginciftci/mermaid-to-vsdx.git
+cd mermaid-to-vsdx
+python -m pip install -r requirements.txt
+```
+
+Launch the Windows 11 Fluent Desktop GUI:
+```powershell
+python main.py
+# or double-click run.bat
 ```
 
 Dependencies in `requirements.txt`:
 - `pywin32>=306`: Microsoft Visio COM automation interface.
 - `pillow>=10.0.0`: Image processing and high-resolution preview canvas.
 - `sv-ttk>=2.6.0`: Modern Windows 11 Fluent theme for Tkinter.
-
-### 2. Launch the Desktop Application
-
-Double-click `run.bat` or execute:
-
-```powershell
-python main.py
-```
 
 ---
 
@@ -146,23 +162,25 @@ python main.py
 
 ## 💻 Headless CLI Mode
 
-The application can also be run headlessly from the command line for automated workflows or CI/CD pipelines:
+The converter can be run headlessly from the command line for automated workflows, agent pipelines, or CI/CD tasks:
 
 ```powershell
 # Convert a Mermaid file (.mmd or .txt) to Visio with automatic visual verification
-python main.py input_diagram.mmd -o output/diagram.vsdx --verify
+mermaid-to-vsdx input_diagram.mmd -o output/diagram.vsdx --verify
 
 # Extract Mermaid code block directly from a Markdown document (.md)
-python main.py documentation.md -o output/architecture.vsdx --verify
+mermaid-to-vsdx documentation.md -o output/architecture.vsdx --verify
 
 # Black & White / Grayscale publication theme
-python main.py input_diagram.mmd -o output/diagram.vsdx --palette "Grayscale Clean (Black & White)" --verify
+mermaid-to-vsdx input_diagram.mmd -o output/diagram.vsdx --palette "Grayscale Clean (Black & White)" --verify
 
 # Choose a specific palette and font
-python main.py input_diagram.mmd -o output/diagram.vsdx --palette "Emerald Tech (Mint & Teal)" --font "Calibri" --verify
+mermaid-to-vsdx input_diagram.mmd -o output/diagram.vsdx --palette "Emerald Tech (Mint & Teal)" --font "Calibri" --verify
 
 # Specify a custom screenshot output path
-python main.py input_diagram.mmd -o output/diagram.vsdx --screenshot verification_output/my_diagram.png
+mermaid-to-vsdx input_diagram.mmd -o output/diagram.vsdx --screenshot verification_output/my_diagram.png
+
+# Note: You can also use 'python main.py ...' when working inside the cloned repository root.
 ```
 
 ### CLI Arguments:

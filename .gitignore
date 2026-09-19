@@ -3,6 +3,13 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Packaging & Build artifacts
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+
 # Large binary distribution packages & offline wheels (DO NOT PUSH)
 Mermaid_to_Visio_Converter_Offline_Airgapped.zip
 *.zip

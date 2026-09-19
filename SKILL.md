@@ -9,6 +9,27 @@ This skill equips AI coding agents (Antigravity, Claude Code, Cursor, Copilot, A
 
 ---
 
+## ⚡ Quick Agent Setup (One-Line Global Installation)
+
+Any agent can install the CLI globally into its environment with:
+
+```bash
+pip install git+https://github.com/enginciftci/mermaid-to-vsdx.git
+```
+
+Once installed, the `mermaid-to-vsdx` command is available from **any directory** without needing to clone or locate repository paths:
+
+```bash
+mermaid-to-vsdx diagram.mmd -o output/diagram.vsdx
+```
+
+If working inside a cloned repository:
+```bash
+python main.py diagram.mmd -o output/diagram.vsdx
+```
+
+---
+
 ## 🧠 Instructions for AI Agents
 
 When a user asks you to:
@@ -44,14 +65,17 @@ Recommended Unicode Fonts:
 #### Step 3: Execute Headless Compilation (CLI)
 Run the converter from your terminal:
 ```powershell
-# Pure Python headless compilation (Zero Visio required, runs everywhere)
+# Global CLI command (works from any directory)
+mermaid-to-vsdx input_diagram.mmd -o output/diagram.vsdx --engine native --palette "Modern Corporate (Blue & Slate)" --font "Segoe UI"
+
+# Or from cloned repository root
 python main.py input_diagram.mmd -o output/diagram.vsdx --engine native --palette "Modern Corporate (Blue & Slate)" --font "Segoe UI"
 ```
 
 #### Step 4: Visual Verification (When Visio is Available)
 If running on Windows with Microsoft Visio installed, add `--verify` to capture a high-resolution PNG screenshot of the Visio canvas:
 ```powershell
-python main.py input_diagram.mmd -o output/diagram.vsdx --verify
+mermaid-to-vsdx input_diagram.mmd -o output/diagram.vsdx --verify
 ```
 The screenshot will be saved in `verification_output/`. Use your file viewing tool (`view_file`) to inspect the exported PNG:
 - Confirm that labels are centered and fully legible.
@@ -83,12 +107,9 @@ Provide clickable links in your markdown response:
 
 Agents can also invoke the converter directly within Python scripts:
 
-### Headless Native Compilation (Zero Dependencies):
+### Headless Native Compilation (Zero Visio Required):
 ```python
-import sys
-sys.path.insert(0, ".")
-
-from src.compiler import compile_mermaid_to_vsdx
+from mermaid_to_vsdx import convert_mermaid_to_visio
 
 mermaid_code = """
 graph TD
@@ -97,27 +118,28 @@ graph TD
     B -->|No| D[Send Notification: Rejected]
 """
 
-vsdx_path = compile_mermaid_to_vsdx(
+diag_type, vsdx_path = convert_mermaid_to_visio(
     mermaid_code=mermaid_code,
     output_vsdx_path="output/workflow.vsdx",
     palette_name="Modern Corporate (Blue & Slate)",
-    font_name="Segoe UI"
+    font_name="Segoe UI",
+    engine="native"
 )
-print(f"Generated: {vsdx_path}")
+print(f"Generated {diag_type}: {vsdx_path}")
 ```
 
 ### Markdown Ingestion:
 ```python
-from src.parser import extract_mermaid_from_markdown, parse_mermaid
+from mermaid_to_vsdx import extract_mermaid_from_markdown, parse_mermaid
 
 # Automatically extracts ```mermaid code blocks from markdown documentation
 clean_mermaid = extract_mermaid_from_markdown(full_markdown_text)
-ast = parse_mermaid(clean_mermaid)
+diag_type, ast = parse_mermaid(clean_mermaid)
 ```
 
 ---
 
-## 📋 Supported Diagram Types & Ast Reference
+## 📋 Supported Diagram Types & AST Reference
 
 1. **Flowcharts (`graph TD`, `flowchart LR`, `BT`, `RL`)**:
    - Shapes: `[Rectangle]`, `(Rounded)`, `([Stadium / Pill])`, `[[Subroutine]]`, `[(Cylinder / Database)]`, `((Circle))`, `{Diamond / Decision}`, `{{Hexagon}}`, `[/Parallelogram/]`.

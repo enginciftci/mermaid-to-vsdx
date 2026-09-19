@@ -5,8 +5,8 @@ without requiring Microsoft Visio or Windows COM Interop.
 """
 
 from typing import Tuple
-from src.parser import parse_mermaid, DiagramType
-from src.visio.palettes import DEFAULT_PALETTE_NAME
+from ..parser import parse_mermaid, DiagramType
+from ..visio.palettes import DEFAULT_PALETTE_NAME
 from .flowchart_compiler import compile_flowchart_to_vsdx
 from .sequence_compiler import compile_sequence_to_vsdx
 from .class_compiler import compile_class_diagram_to_vsdx

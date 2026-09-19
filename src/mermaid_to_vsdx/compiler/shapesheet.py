@@ -6,7 +6,7 @@ Builds parametric 2D shapes, subgraph containers, 1D dynamic connectors, and <Co
 import html
 import re
 from typing import Dict, List, Optional, Tuple
-from src.visio.palettes import is_dark_color
+from ..visio.palettes import is_dark_color
 
 
 def rgb_to_hex(color_str: str) -> str:

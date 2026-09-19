@@ -4,17 +4,17 @@ Transforms StateDiagram AST into Open Packaging Conventions Visio XML.
 """
 
 from typing import Dict, List, Tuple
-from src.parser.ast_nodes import StateDiagram, StateNodeType
-from src.visio.palettes import PALETTES, DEFAULT_PALETTE_NAME, is_dark_color
-from src.compiler.text_metrics import estimate_text_dimensions
-from src.compiler.layout_engine import SugiyamaLayoutEngine
-from src.compiler.shapesheet import (
+from ..parser.ast_nodes import StateDiagram, StateNodeType
+from ..visio.palettes import PALETTES, DEFAULT_PALETTE_NAME, is_dark_color
+from .text_metrics import estimate_text_dimensions
+from .layout_engine import SugiyamaLayoutEngine
+from .shapesheet import (
     build_2d_shape_xml,
     build_1d_connector_xml,
     build_connect_records,
     calculate_connector_endpoints_and_ports,
 )
-from src.compiler.opc_package import package_vsdx
+from .opc_package import package_vsdx
 
 
 def compile_state_diagram_to_vsdx(

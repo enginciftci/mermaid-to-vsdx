@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mermaid-to-vsdx"
+version = "1.0.0"
+description = "Professional Mermaid diagram to Microsoft Visio (.vsdx) converter"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Engin Ciftci"}
+]
+keywords = ["mermaid", "visio", "vsdx", "diagram", "converter", "agent", "skills", "flowchart", "cli"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Graphics :: Graphics Conversion",
+    "Topic :: Software Development :: Documentation",
+]
+dependencies = [
+    "pillow>=10.0.0",
+    "sv-ttk>=2.6.0",
+    "pywin32>=306; sys_platform == 'win32'",
+]
+
+[project.scripts]
+mermaid-to-vsdx = "mermaid_to_vsdx.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/enginciftci/mermaid-to-vsdx"
+Repository = "https://github.com/enginciftci/mermaid-to-vsdx.git"
+Issues = "https://github.com/enginciftci/mermaid-to-vsdx/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"mermaid_to_vsdx.compiler" = ["*.xml"]

@@ -1,0 +1,3 @@
+include src/mermaid_to_vsdx/compiler/standard_document.xml
+include README.md
+include LICENSE
