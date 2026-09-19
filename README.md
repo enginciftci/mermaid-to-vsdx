@@ -1,6 +1,10 @@
 # Mermaid to Microsoft Visio (.vsdx) Converter
 ### Enterprise-Grade Native Headless Compiler & Desktop Application
 
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-windows%20%7C%20linux%20%7C%20macos-lightgrey.svg)]()
+
 A robust, enterprise-grade tool that converts **Mermaid diagrams** (Flowcharts, Sequence diagrams, UML Class diagrams, Entity-Relationship diagrams, and State machines) into professional, beautifully styled **Microsoft Visio (`.vsdx`)** vector drawings with **100% Turkish character fidelity**, automated visual verification screenshots, and dynamic connector routing.
 
 Featuring a **Dual-Engine Architecture**:
@@ -104,6 +108,8 @@ python main.py diagram.mmd -o output/diagram.vsdx --verify
 ---
 
 ## 🚀 Quick Start
+
+> **Prerequisites**: Python 3.10 or newer (`python --version`). Compatible with Windows, macOS, and Linux (Native OPC Engine).
 
 ### Option A: Install Globally via Pip (Recommended for Agents & CLI)
 

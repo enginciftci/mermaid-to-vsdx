@@ -11,6 +11,8 @@ This skill equips AI coding agents (Antigravity, Claude Code, Cursor, Copilot, A
 
 ## ⚡ Quick Agent Setup (One-Line Global Installation)
 
+**Prerequisite**: Python 3.10 or newer (`python --version >= 3.10`).
+
 Any agent can install the CLI globally into its environment with:
 
 ```bash
