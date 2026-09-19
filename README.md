@@ -209,7 +209,6 @@ mermaid-to-vsdx/
 ├── main.py                       # Application entrypoint (GUI + CLI)
 ├── run.bat                       # One-click Windows 11 launcher
 ├── run.ps1                       # PowerShell launcher
-├── install_offline.bat           # Offline dependency installer
 ├── requirements.txt              # Pip dependencies
 ├── LICENSE                       # MIT License
 └── README.md                     # Documentation
@@ -223,11 +222,6 @@ mermaid-to-vsdx/
 - **"Microsoft Visio Bulunamadı" (When using `--engine com` or `--verify`)**: Ensure Microsoft Visio is installed on the machine. The application checks Windows Registry CLSIDs (`Visio.Application` / `Visio.InvisibleApp`) and standard Office 16 Program Files directories.
 - **Malformed Mermaid Syntax**: The editor highlights the faulty line with an indicator and reports the specific syntax issue.
 - **COM Apartment Issues**: All COM calls run within Python Single-Threaded Apartments (`pythoncom.CoInitialize()` / `CoUninitialize()`), ensuring thread safety and preventing UI freezing.
-- **Airgapped / Offline Usage**: To prepare wheels for an offline machine, run:
-  ```powershell
-  pip download -r requirements.txt -d wheels
-  ```
-  Then copy the project with the `wheels/` directory to the target airgapped machine and run `install_offline.bat`.
 
 ---
 

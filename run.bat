@@ -25,7 +25,7 @@ echo Python bulundu: %PYTHON_CMD%
 
 %PYTHON_CMD% -c "import win32com.client, PIL, sv_ttk" >nul 2>&1
 if %errorlevel% neq 0 (
-    echo Bagimliliklar kuruluyor - Cevrimdisi wheels klasorunden...
+    echo Bagimliliklar kuruluyor...
     if exist "%~dp0wheels" (
         %PYTHON_CMD% -m pip install --no-index --find-links="%~dp0wheels" -r "%~dp0requirements.txt" --quiet
     ) else (
