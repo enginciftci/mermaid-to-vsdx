@@ -183,22 +183,6 @@ python main.py input_diagram.mmd -o output/diagram.vsdx --screenshot verificatio
 
 ---
 
-## 🧪 Running Automated Tests
-
-Run the full unit and integration test suite:
-
-```powershell
-python -m unittest discover -s tests -p "test_*.py" -v
-```
-
-The test suite validates:
-1. **`test_opc_compiler.py`**: Pure headless unit tests verifying Open Packaging Conventions (OPC) XML structure, dynamic connects, Sugiyama layout, text metrics, and palettes without needing Visio.
-2. **`test_parser.py`**: Flowchart node shapes, arrow types, edge labels, subgraphs, sequence lifelines, UML class diagrams, and syntax error detection.
-3. **`test_turkish_encoding.py`**: Turkish character normalization, HTML entities, and ShapeSheet formula escaping.
-4. **`test_visio_generation.py`**: End-to-end integration tests that generate `.vsdx` files via Visio COM and capture verification screenshots.
-
----
-
 ## 🏗 Architecture & Code Structure
 
 ```text
@@ -245,12 +229,6 @@ mermaid-to-vsdx/
 │   └── utils/
 │       ├── __init__.py
 │       └── unicode_helper.py     # Turkish char analysis, NFC normalization, font helpers
-│
-├── tests/
-│   ├── test_opc_compiler.py      # Headless native compiler unit tests (zero Visio)
-│   ├── test_parser.py            # AST unit tests
-│   ├── test_turkish_encoding.py  # Turkish character encoding tests
-│   └── test_visio_generation.py  # Visio COM integration tests
 │
 ├── assets/                       # High-resolution showcase diagram screenshots
 ├── skills/                       # Modular AI Agent skill package
