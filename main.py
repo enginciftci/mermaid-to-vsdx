@@ -84,7 +84,7 @@ def main():
     parser.add_argument("-o", "--output", help="Path to destination .vsdx file.")
     parser.add_argument("-p", "--palette", default=DEFAULT_PALETTE_NAME, choices=list(PALETTES.keys()), help="Color palette theme.")
     parser.add_argument("-f", "--font", default=DEFAULT_FONT, help="Unicode font family (Segoe UI, Calibri, Arial).")
-    parser.add_argument("--engine", default="native", choices=["native", "com"], help="Conversion engine: 'native' (100% headless, zero Visio required) or 'com' (Visio COM automation).")
+    parser.add_argument("--engine", default="native", choices=["native", "com"], help="Conversion engine: 'native' (100%% headless, zero Visio required) or 'com' (Visio COM automation).")
     parser.add_argument("--verify", action="store_true", help="Opens drawing in Visio to verify layout and export high-resolution PNG screenshot.")
     parser.add_argument("-s", "--screenshot", help="Custom output path for the verification screenshot PNG.")
     parser.add_argument("--verification-dir", default="verification_output", help="Directory where verification screenshots will be saved.")
