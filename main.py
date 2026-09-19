@@ -28,7 +28,7 @@ def run_cli(args):
     """
     input_file = os.path.abspath(args.input)
     if not os.path.exists(input_file):
-        print(f"Hata: Girdi dosyası bulunamadı: {input_file}", file=sys.stderr)
+        print(f"Error: Input file not found: {input_file}", file=sys.stderr)
         sys.exit(1)
 
     with open(input_file, "r", encoding="utf-8") as f:
@@ -36,18 +36,18 @@ def run_cli(args):
 
     mermaid_code = extract_mermaid_from_markdown(raw_code)
     if mermaid_code != raw_code.strip():
-        print(f"✓ Markdown Belgesi: Kod bloğu başarıyla ayıklandı ({len(mermaid_code.splitlines())} satır).")
+        print(f"✓ Markdown Document: Code block successfully extracted ({len(mermaid_code.splitlines())} lines).")
 
-    # Turkish character analysis
+    # Turkish / Unicode character analysis
     tr_info = verify_turkish_chars(mermaid_code)
     if tr_info["has_turkish"]:
-        print(f"✓ Türkçe Karakter Tespiti: {tr_info['total_turkish_chars']} adet Türkçe karakter doğrulandı.")
+        print(f"✓ Unicode/Turkish Character Check: {tr_info['total_turkish_chars']} characters verified.")
 
     output_path = args.output or os.path.splitext(input_file)[0] + ".vsdx"
     output_path = os.path.abspath(output_path)
 
-    engine_desc = "Headless OPC Derleyici (Native)" if args.engine == "native" else "Visio COM Otomasyonu"
-    print(f"Mermaid şeması ayrıştırılıyor ve Visio'ya aktarılıyor ({engine_desc})...")
+    engine_desc = "Headless OPC Compiler (Native)" if args.engine == "native" else "Visio COM Automation"
+    print(f"Parsing Mermaid diagram and compiling to Visio ({engine_desc})...")
     diag_type, vsdx_path = convert_mermaid_to_visio(
         mermaid_code=mermaid_code,
         output_vsdx_path=output_path,
@@ -55,39 +55,39 @@ def run_cli(args):
         font_name=args.font,
         engine=args.engine,
     )
-    print(f"✓ Visio dosyası başarıyla oluşturuldu: {vsdx_path}")
+    print(f"✓ Visio diagram successfully created: {vsdx_path}")
 
     if args.verify or args.screenshot:
         screenshot_target = args.screenshot if args.screenshot else None
-        print(f"Görsel doğrulama çalıştırılıyor (Visio tuval görüntüsü alınıyor)...")
+        print("Running visual verification (capturing Visio canvas)...")
         try:
             res = verify_and_capture_visio(
                 vsdx_path=vsdx_path,
                 output_image_path=screenshot_target,
                 verification_dir=args.verification_dir
             )
-            print(f"✓ Görsel Doğrulama Başarılı:")
-            print(f"   Ekran Görüntüsü : {res['image_path']}")
-            print(f"   Çözünürlük      : {res['width']}x{res['height']} piksel")
-            print(f"   Dosya Boyutu    : {res['file_size_kb']} KB")
-            print(f"   İşlem Süresi    : {res['render_time_sec']} saniye")
+            print(f"✓ Visual Verification Successful:")
+            print(f"   Screenshot   : {res['image_path']}")
+            print(f"   Resolution   : {res['width']}x{res['height']} pixels")
+            print(f"   File Size    : {res['file_size_kb']} KB")
+            print(f"   Render Time  : {res['render_time_sec']} seconds")
         except Exception as ver_err:
-            print(f"ℹ Görsel doğrulama atlandı: {ver_err}", file=sys.stderr)
+            print(f"ℹ Visual verification skipped: {ver_err}", file=sys.stderr)
 
 
 def main():
     parser = argparse.ArgumentParser(
         description="Mermaid to Microsoft Visio (.vsdx) Converter - Professional Edition"
     )
-    parser.add_argument("input_pos", nargs="?", metavar="input", help="Girdi Mermaid (.mmd, .txt) dosyası yolu. Boş bırakılırsa grafik arayüz (GUI) açılır.")
-    parser.add_argument("-i", "--input", dest="input_opt", help="Girdi Mermaid (.mmd, .txt) dosyası yolu.")
-    parser.add_argument("-o", "--output", help="Çıktı .vsdx dosya yolu.")
-    parser.add_argument("-p", "--palette", default=DEFAULT_PALETTE_NAME, choices=list(PALETTES.keys()), help="Renk paleti teması.")
-    parser.add_argument("-f", "--font", default=DEFAULT_FONT, help="Kullanılacak Unicode yazı tipi (Segoe UI, Calibri, Arial).")
-    parser.add_argument("--engine", default="native", choices=["native", "com"], help="Dönüştürme motoru: 'native' (100%% headless, Visio gerektirmez) veya 'com' (Visio COM otomasyonu).")
-    parser.add_argument("--verify", action="store_true", help="Oluşturulan çizimi Visio'da açıp yüksek çözünürlüklü doğrulama ekran görüntüsü alır.")
-    parser.add_argument("-s", "--screenshot", help="Doğrulama ekran görüntüsünün kaydedileceği özel dosya yolu.")
-    parser.add_argument("--verification-dir", default="verification_output", help="Doğrulama ekran görüntülerinin kaydedileceği klasör.")
+    parser.add_argument("input_pos", nargs="?", metavar="input", help="Path to input Mermaid (.mmd, .txt, .md) file. If omitted, desktop GUI opens.")
+    parser.add_argument("-i", "--input", dest="input_opt", help="Path to input Mermaid (.mmd, .txt, .md) file.")
+    parser.add_argument("-o", "--output", help="Path to destination .vsdx file.")
+    parser.add_argument("-p", "--palette", default=DEFAULT_PALETTE_NAME, choices=list(PALETTES.keys()), help="Color palette theme.")
+    parser.add_argument("-f", "--font", default=DEFAULT_FONT, help="Unicode font family (Segoe UI, Calibri, Arial).")
+    parser.add_argument("--engine", default="native", choices=["native", "com"], help="Conversion engine: 'native' (100% headless, zero Visio required) or 'com' (Visio COM automation).")
+    parser.add_argument("--verify", action="store_true", help="Opens drawing in Visio to verify layout and export high-resolution PNG screenshot.")
+    parser.add_argument("-s", "--screenshot", help="Custom output path for the verification screenshot PNG.")
+    parser.add_argument("--verification-dir", default="verification_output", help="Directory where verification screenshots will be saved.")
 
     args = parser.parse_args()
     args.input = args.input_opt or args.input_pos
