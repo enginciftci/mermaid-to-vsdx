@@ -1,0 +1,34 @@
+classDiagram
+    class OdemeServisi {
+        <<interface>>
+        +String servisAdi
+        +odemeYap(tutar) bool
+        +iadeEt(tutar) bool
+    }
+    class KrediKartiServisi {
+        -String posId
+        -String terminalNo
+        +odemeYap(tutar) bool
+    }
+    class HavaleServisi {
+        -String iban
+        -String bankaKodu
+        +odemeYap(tutar) bool
+    }
+    class SiparisYonetimi {
+        +String siparisKodu
+        +Date olusturmaTarihi
+        +BigDecimal toplamTutar
+        +siparisOnayla() bool
+        +iptalEt() void
+    }
+    class MusteriHesabi {
+        +String adSoyad
+        +String ePosta
+        +girisYap() bool
+    }
+
+    OdemeServisi <|.. KrediKartiServisi : uygular
+    OdemeServisi <|.. HavaleServisi : uygular
+    MusteriHesabi "1" --> "*" SiparisYonetimi : verir
+    SiparisYonetimi *-- "1" OdemeServisi : kullanir

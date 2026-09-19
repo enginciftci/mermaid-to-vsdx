@@ -1,0 +1,30 @@
+flowchart LR
+    subgraph MUSTERI_PANELI ["Müşteri Ön Yüzü & Kimlik Doğrulama"]
+        A[Web Tarayıcı İstemcisi]
+        B[Mobil Uygulama iOS/Android]
+    end
+
+    subgraph AG_GECIDI ["API Ağ Geçidi (API Gateway)"]
+        GW[Tersine Dizin ve Güvenlik Duvarı]
+    end
+
+    subgraph MIKROSERVISLER ["İç İşlem Mikroservisleri"]
+        S1[Kullanıcı Servisi]
+        S2[Ödeme ve Provizyon Servisi]
+        S3[Bildirim ve Mesajlaşma Servisi]
+    end
+
+    subgraph VERI_KATMANI ["Güvenli Veritabanı Deposu"]
+        DB1[(PostgreSQL Müşteri Verisi)]
+        DB2[(Redis Önbellek Kümesi)]
+        DB3[(Kafka Olay Kuyruğu)]
+    end
+
+    A --> GW
+    B --> GW
+    GW --> S1
+    GW --> S2
+    GW --> S3
+    S1 --> DB1
+    S2 --> DB2
+    S3 --> DB3

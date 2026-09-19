@@ -1,0 +1,257 @@
+"""
+Native headless compiler for Mermaid Flowcharts.
+Transforms FlowchartDiagram AST into Open Packaging Conventions Visio XML.
+"""
+
+from typing import Dict, List, Tuple
+from src.parser.ast_nodes import FlowchartDiagram, ShapeType, EdgeStyle, ArrowType
+from src.visio.palettes import PALETTES, DEFAULT_PALETTE_NAME, is_dark_color
+from src.compiler.text_metrics import estimate_text_dimensions
+from src.compiler.layout_engine import SugiyamaLayoutEngine
+from src.compiler.shapesheet import (
+    build_2d_shape_xml,
+    build_1d_connector_xml,
+    build_connect_records,
+    calculate_connector_endpoints,
+    calculate_connector_endpoints_and_ports,
+)
+from src.compiler.opc_package import package_vsdx
+
+
+# Shape mapping from AST ShapeType to geometry types
+SHAPE_MAP = {
+    ShapeType.RECTANGLE: "rectangle",
+    ShapeType.ROUNDED: "rounded",
+    ShapeType.STADIUM: "stadium",
+    ShapeType.SUBROUTINE: "subroutine",
+    ShapeType.CYLINDER: "cylinder",
+    ShapeType.CIRCLE: "circle",
+    ShapeType.ASYMMETRIC: "asymmetric",
+    ShapeType.DIAMOND: "diamond",
+    ShapeType.HEXAGON: "hexagon",
+    ShapeType.PARALLELOGRAM: "parallelogram_right",
+    ShapeType.TRAPEZOID: "trapezoid",
+}
+
+
+def compile_flowchart_to_vsdx(
+    diagram: FlowchartDiagram,
+    output_path: str,
+    palette_name: str = DEFAULT_PALETTE_NAME,
+    font_name: str = "Segoe UI",
+) -> str:
+    palette = PALETTES.get(palette_name, PALETTES[DEFAULT_PALETTE_NAME])
+
+    # 1. Text sizing heuristics for each node
+    node_dims: Dict[str, Tuple[float, float, str]] = {}
+    node_subgraph: Dict[str, str] = {}
+    for sub in diagram.subgraphs:
+        for nid in sub.node_ids:
+            node_subgraph[nid] = sub.id
+
+    for nid, node in diagram.nodes.items():
+        w, h, lines = estimate_text_dimensions(
+            text=node.label,
+            font_size_pt=10.0,
+            min_width_in=1.8 if node.shape == ShapeType.DIAMOND else 1.5,
+            min_height_in=0.9 if node.shape == ShapeType.DIAMOND else 0.75,
+        )
+        node_dims[nid] = (w, h, node_subgraph.get(nid))
+
+    # 2. Extract edge pairs
+    edge_pairs = [(e.source_id, e.target_id) for e in diagram.edges]
+
+    # 3. Extract subgraphs
+    subgraph_map = {s.id: (s.title, s.node_ids) for s in diagram.subgraphs}
+
+    # 4. Run Sugiyama topological layout
+    layout_engine = SugiyamaLayoutEngine(
+        direction=diagram.direction,
+        rank_gap=1.0,
+        node_gap=0.6,
+        page_margin=1.0,
+    )
+    layout_res = layout_engine.layout(node_dims, edge_pairs, subgraph_map)
+
+    shapes_xml_list: List[str] = []
+    connects_xml_list: List[str] = []
+    shape_id_counter = 1
+    node_to_shape_id: Dict[str, int] = {}
+
+    # 5. Render Subgraph Containers (rendered first so nodes draw on top)
+    for sub_id, sub_info in layout_res.subgraphs.items():
+        cont_id = shape_id_counter
+        shape_id_counter += 1
+
+        # Container bounding box
+        cont_xml = build_2d_shape_xml(
+            shape_id=cont_id,
+            name=f"Container_{sub_id}",
+            pin_x=sub_info.pin_x,
+            pin_y=sub_info.pin_y,
+            width=sub_info.width,
+            height=sub_info.height,
+            text="",
+            shape_type="rectangle",
+            fill_color=palette.subgraph_fill,
+            line_color=palette.subgraph_border,
+            line_weight_in=0.0208,
+            line_pattern=2,  # Dashed boundary
+            rounding_in=0.1,
+            is_container=True,
+        )
+        shapes_xml_list.append(cont_xml)
+
+        # Header banner for title
+        hdr_id = shape_id_counter
+        shape_id_counter += 1
+        hdr_w = max(2.2, min(sub_info.width - 0.4, 4.0))
+        hdr_h = 0.35
+        hdr_pin_x = sub_info.pin_x
+        hdr_pin_y = sub_info.pin_y + sub_info.height / 2.0 - hdr_h / 2.0 - 0.05
+
+        hdr_xml = build_2d_shape_xml(
+            shape_id=hdr_id,
+            name=f"Header_{sub_id}",
+            pin_x=hdr_pin_x,
+            pin_y=hdr_pin_y,
+            width=hdr_w,
+            height=hdr_h,
+            text=sub_info.title,
+            shape_type="rectangle",
+            fill_color=palette.subgraph_border,
+            line_color=palette.subgraph_border,
+            text_color="#ffffff" if is_dark_color(palette.subgraph_border) else palette.subgraph_text,
+            line_weight_in=0.01,
+            rounding_in=0.05,
+            font_name=font_name,
+            font_size_pt=9.0,
+            has_connections=False,
+        )
+        shapes_xml_list.append(hdr_xml)
+
+    # 6. Render 2D Node Shapes
+    for nid, node in diagram.nodes.items():
+        s_id = shape_id_counter
+        shape_id_counter += 1
+        node_to_shape_id[nid] = s_id
+
+        l_node = layout_res.nodes[nid]
+        geom_type = SHAPE_MAP.get(node.shape, "rectangle")
+
+        # Palette semantic color selection
+        fill_col = palette.default_fill
+        border_col = palette.default_border
+        text_col = palette.default_text
+
+        if node.shape == ShapeType.DIAMOND:
+            fill_col = palette.decision_fill
+            border_col = palette.decision_border
+            text_col = palette.default_text
+        elif node.shape == ShapeType.CYLINDER:
+            fill_col = palette.database_fill
+            border_col = palette.database_border
+            text_col = palette.default_text
+        elif node.shape == ShapeType.STADIUM:
+            fill_col = palette.terminal_fill
+            border_col = palette.terminal_border
+            text_col = palette.default_text
+
+        # If font background is black or dark, font face MUST be white
+        if is_dark_color(fill_col):
+            text_col = "#ffffff"
+
+        shape_xml = build_2d_shape_xml(
+            shape_id=s_id,
+            name=f"Node_{nid}",
+            pin_x=l_node.pin_x,
+            pin_y=l_node.pin_y,
+            width=l_node.width,
+            height=l_node.height,
+            text=node.label,
+            shape_type=geom_type,
+            fill_color=fill_col,
+            line_color=border_col,
+            text_color=text_col,
+            line_weight_in=0.0208,
+            font_name=font_name,
+            font_size_pt=10.0,
+        )
+        shapes_xml_list.append(shape_xml)
+
+    # 7. Render 1D Connectors & <Connects>
+    for edge in diagram.edges:
+        if edge.source_id not in node_to_shape_id or edge.target_id not in node_to_shape_id:
+            continue
+
+        c_id = shape_id_counter
+        shape_id_counter += 1
+
+        src_s_id = node_to_shape_id[edge.source_id]
+        dst_s_id = node_to_shape_id[edge.target_id]
+        src_node = layout_res.nodes[edge.source_id]
+        dst_node = layout_res.nodes[edge.target_id]
+
+        # Arrow markers and line pattern
+        begin_arrow = 13 if edge.arrow_start != ArrowType.NONE else 0
+        end_arrow = 13 if edge.arrow_end != ArrowType.NONE else 0
+        line_pat = 2 if edge.style == EdgeStyle.DOTTED else 1
+        line_wt = 0.032 if edge.style == EdgeStyle.THICK else 0.018
+        arr_sz = 3 if edge.style == EdgeStyle.THICK else 2
+
+        bx, by, ex, ey, src_port, dst_port, src_part, dst_part = calculate_connector_endpoints_and_ports(
+            src_x=src_node.pin_x,
+            src_y=src_node.pin_y,
+            src_w=src_node.width,
+            src_h=src_node.height,
+            dst_x=dst_node.pin_x,
+            dst_y=dst_node.pin_y,
+            dst_w=dst_node.width,
+            dst_h=dst_node.height,
+            direction=diagram.direction,
+        )
+
+        conn_xml = build_1d_connector_xml(
+            connector_id=c_id,
+            begin_x=bx,
+            begin_y=by,
+            end_x=ex,
+            end_y=ey,
+            label=edge.label or "",
+            line_color=palette.connector_line,
+            line_weight_in=line_wt,
+            line_pattern=line_pat,
+            begin_arrow=begin_arrow,
+            end_arrow=end_arrow,
+            end_arrow_size=arr_sz,
+            font_name=font_name,
+            font_size_pt=9.0,
+            text_color=palette.connector_text,
+            is_dynamic=True,
+            source_shape_id=src_s_id,
+            target_shape_id=dst_s_id,
+            src_port=src_port,
+            dst_port=dst_port,
+            routing_direction=diagram.direction,
+        )
+        shapes_xml_list.append(conn_xml)
+
+        conn_rec = build_connect_records(
+            connector_id=c_id,
+            source_shape_id=src_s_id,
+            target_shape_id=dst_s_id,
+            src_port=src_port,
+            dst_port=dst_port,
+            src_part=src_part,
+            dst_part=dst_part,
+        )
+        connects_xml_list.append(conn_rec)
+
+    # 8. Serialize to vsdx
+    return package_vsdx(
+        output_path=output_path,
+        shapes_xml="\n".join(shapes_xml_list),
+        connects_xml="\n".join(connects_xml_list),
+        page_width=layout_res.page_width,
+        page_height=layout_res.page_height,
+    )

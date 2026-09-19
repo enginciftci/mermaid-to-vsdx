@@ -1,0 +1,25 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Large binary distribution packages & offline wheels (DO NOT PUSH)
+Mermaid_to_Visio_Converter_Offline_Airgapped.zip
+*.zip
+wheels/
+*.whl
+
+# Runtime generation outputs & temporary test artifacts
+output/
+verification_output/
+scratch/
+
+# Operating System & IDE metadata
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
