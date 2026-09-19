@@ -92,9 +92,9 @@ from src.compiler import compile_mermaid_to_vsdx
 
 mermaid_code = """
 graph TD
-    A([Müşteri Talebi]) --> B{Onaylandı mı?}
-    B -->|Evet| C[(Veritabanı)]
-    B -->|Hayır| D[Bildirim Gönder: Reddedildi]
+    A([Customer Request]) --> B{Approved?}
+    B -->|Yes| C[(Database)]
+    B -->|No| D[Send Notification: Rejected]
 """
 
 vsdx_path = compile_mermaid_to_vsdx(

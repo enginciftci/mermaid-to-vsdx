@@ -1,42 +1,42 @@
 """
-Mermaid diagram sample presets with rich Turkish character content and various diagram types.
+Mermaid diagram sample presets for desktop GUI with various diagram types.
 """
 
 SAMPLES = {
-    "1. Akış Şeması - E-Ticaret Sipariş & Kargo Süreci (Flowchart TD)": """graph TD
-    A([Müşteri Siparişi Oluşturdu]) --> B[Ödeme Onayı Bekleniyor]
-    B --> C{Ödeme Başarılı mı?}
-    C -->|Evet: Kart Çekildi| D[(Sipariş Veritabanına Kaydet)]
-    C -->|Hayır: Yetersiz Bakiye| E[Kullanıcıya SMS ve E-Posta Bildirimi]
-    E --> F([İşlemi İptal Et])
+    "1. Flowchart - E-Commerce Order & Delivery Pipeline (Flowchart TD)": """graph TD
+    A([Customer Places Order]) --> B[Payment Authorization Pending]
+    B --> C{Payment Successful?}
+    C -->|Yes: Card Charged| D[(Record Order in Database)]
+    C -->|No: Insufficient Funds| E[Send Email & SMS Notification]
+    E --> F([Cancel Order])
     
-    D --> G[Depo Hazırlık Birimine İlet]
-    G --> H[Fatura ve İrsaliye Düzenle]
-    H --> I[(Kargo Takip Sistemi)]
-    I --> J[Kuryeye Teslim Edildi]
-    J --> K([Müşteriye Teslim Edildi])
+    D --> G[Notify Warehouse Logistics]
+    G --> H[Generate Invoice & Waybill]
+    H --> I[(Shipment Tracking System)]
+    I --> J[Dispatched with Courier]
+    J --> K([Delivered to Customer])
 """,
 
-    "2. Alt Sistemler - Mikroservis & Veritabanı Mimarisi (Subgraphs LR)": """flowchart LR
-    subgraph MUSTERI_PANELI ["Müşteri Ön Yüzü & Kimlik Doğrulama"]
-        A[Web Tarayıcı İstemcisi]
-        B[Mobil Uygulama iOS/Android]
+    "2. Subsystems - Microservices & Data Layer Architecture (Subgraphs LR)": """flowchart LR
+    subgraph CLIENT_TIER ["Client Applications & Auth"]
+        A[Web Browser Client]
+        B[Mobile App iOS & Android]
     end
 
-    subgraph AG_GECIDI ["API Ağ Geçidi (API Gateway)"]
-        GW[Tersine Dizin ve Güvenlik Duvarı]
+    subgraph API_GATEWAY ["API Gateway & Security"]
+        GW[Reverse Proxy & Firewall]
     end
 
-    subgraph MIKROSERVISLER ["İç İşlem Mikroservisleri"]
-        S1[Kullanıcı Servisi]
-        S2[Ödeme ve Provizyon Servisi]
-        S3[Bildirim ve Mesajlaşma Servisi]
+    subgraph SERVICES ["Core Processing Microservices"]
+        S1[User Account Service]
+        S2[Payment & Billing Service]
+        S3[Notification Service]
     end
 
-    subgraph VERI_KATMANI ["Güvenli Veritabanı Deposu"]
-        DB1[(PostgreSQL Müşteri Verisi)]
-        DB2[(Redis Önbellek Kümesi)]
-        DB3[(Kafka Olay Kuyruğu)]
+    subgraph DATA_LAYER ["Secure Database & Queue Cluster"]
+        DB1[(PostgreSQL Primary DB)]
+        DB2[(Redis In-Memory Cache)]
+        DB3[(Kafka Event Bus)]
     end
 
     A --> GW
@@ -49,165 +49,34 @@ SAMPLES = {
     S3 --> DB3
 """,
 
-    "3. Karar Ağacı - Kredi Başvuru Değerlendirme & Risk Analizi (Flowchart TD)": """graph TD
-    BASLA([Kredi Başvurusu Alındı]) --> KONTROL[KKB ve Findeks Puanı Sorgula]
-    KONTROL --> PUAN_KONTROL{Puan >= 1400 mü?}
+    "3. Decision Tree - Loan Application & Risk Assessment (Flowchart TD)": """graph TD
+    START([Loan Application Received]) --> QUERY[Query Credit Bureau & Score]
+    QUERY --> SCORE_CHECK{Score >= 700?}
     
-    PUAN_KONTROL -->|Evet| GELIR_TESTI{Aylık Gelir Yeterli mi?}
-    PUAN_KONTROL -->|Hayır| RED_SEBEP[Risk Seviyesi Yüksek Reddi]
-    RED_SEBEP --> BITIS_RED([Başvuru Reddedildi])
+    SCORE_CHECK -->|Yes| INCOME_CHECK{Monthly Income Sufficient?}
+    SCORE_CHECK -->|No| REJECT_REASON[High Risk Profile Identified]
+    REJECT_REASON --> END_REJECT([Application Rejected])
     
-    GELIR_TESTI -->|Evet| ONAY_LIMIT[Kredi Limiti ve Faiz Oranı Belirle]
-    GELIR_TESTI -->|Hayır| KEFIL_SOR[Ek Teminat veya Kefil İste]
+    INCOME_CHECK -->|Yes| APPROVE_LIMIT[Determine Credit Limit & Rate]
+    INCOME_CHECK -->|No| GUARANTOR_REQ[Request Guarantor or Collateral]
     
-    KEFIL_SOR --> KEFIL_ONAY{Kefil Uygun mu?}
-    KEFIL_ONAY -->|Evet| ONAY_LIMIT
-    KEFIL_ONAY -->|Hayır| BITIS_RED
+    GUARANTOR_REQ --> GUARANTOR_CHECK{Guarantor Approved?}
+    GUARANTOR_CHECK -->|Yes| APPROVE_LIMIT
+    GUARANTOR_CHECK -->|No| END_REJECT
     
-    ONAY_LIMIT --> SOZLESME[(Dijital Sözleşme İmzala)]
-    SOZLESME --> HESABA_AKT([Hesaba Kredi Tutarı Aktarıldı])
+    APPROVE_LIMIT --> CONTRACT[(Sign Digital Contract)]
+    CONTRACT --> DISBURSE([Disburse Loan Funds to Account])
 """,
 
-    "4. Sıralama Şeması - Kullanıcı Girişi & 2FA Doğrulama (Sequence Diagram)": """sequenceDiagram
-    autonumber
-    title Güvenli Kullanıcı Girişi ve İki Aşamalı Doğrulama (2FA) Protokolü
-    actor K as Kullanıcı (Tarayıcı)
-    participant S as Kimlik Sunucusu (Auth)
-    participant SMS as SMS Gönderim Ağ Geçidi
-    participant DB as Güvenli Veritabanı
-
-    K->>S: Kullanıcı Adı ve Şifre Gönder
-    S->>DB: Şifre Özetini Doğrula (Argon2id)
-    DB-->>S: Şifre Doğrulandı (Kullanıcı Aktif)
-    
-    Note over S,SMS: 6 Haneli Tek Kullanımlık Güvenlik Kodu Üret
-    S->>SMS: SMS Doğrulama Kodu İlet (+90 5XX XXX XX XX)
-    SMS-->>K: SMS Kodu İletildi: 849201
-    
-    K->>S: SMS Kodunu Gir: 849201
-    S->>S: Kodu ve Geçerlilik Süresini Kontrol Et
-    Note over S: Güvenlik Kontrolü Başarılı
-    S-->>K: Oturum Jetonu (JWT Bearer Token) Üretildi
-""",
-
-    "5. Sıralama Şeması - Banka Ödeme ve Provizyon Entegrasyonu (Sequence Diagram)": """sequenceDiagram
-    autonumber
-    title Banka Sanal POS Ödeme Provizyon Süreci
-    actor M as Müşteri
-    participant E as E-Ticaret Sunucusu
-    participant POS as Banka Sanal POS Servisi
-    participant B as Kart Sahibi Bankası
-
-    M->>E: Siparişi Onayla ve Kart Bilgilerini Gönder
-    E->>POS: 3D Secure Doğrulama İsteği Başlat
-    POS->>B: 3D Secure Doğrulama Sayfası Yönlendirmesi
-    B-->>M: Doğrulama Şifresi SMS ile Gönderildi
-    M->>B: SMS Şifresini Gir ve Doğrula
-    B-->>POS: 3D Secure Kimlik Doğrulama Başarılı
-    POS->>POS: Provizyon / Bakiye Bloke İşlemi
-    POS-->>E: Ödeme Onaylandı (İşlem No: TR-948291)
-    E-->>M: Sipariş Başarıyla Tamamlandı Fişi
-""",
-
-    "6. Alfabe & Karakter Testi - 100% Türkçe Karakter Bütünlüğü (Flowchart TD)": """graph TD
-    A[Başlangıç: çğıöşü ÇĞİÖŞÜ] -->|İğne İplik Testi| B(Küçük Harfler: ç, ğ, ı, ö, ş, ü)
-    B -->|Şüpheli İşlem Bildirimi| C{Büyük Harfler: Ç, Ğ, İ, Ö, Ş, Ü}
-    C -->|Doğru Kodlama: UTF-8| D[(Türkçe Veritabanı Tablosu: Öğrenci İşleri)]
-    C -->|Hatalı Kodlama Algılandı| E[Hata Günlüğü: Çağdaş İletişim]
-    D --> F([İşlem Başarıyla Tamamlandı: Teşekkürler!])
-""",
-
-    "7. Sınıf Şeması - E-Ticaret ve Ödeme Nesne Mimarisi (Class Diagram)": """classDiagram
-    class OdemeYontemi {
-        <<interface>>
-        +String ad
-        +odemeYap(tutar) bool
-        +iadeEt(tutar) bool
-    }
-    class KrediKarti {
-        -String kartNumarasi
-        -String sonKullanmaTarihi
-        -String cvv
-        +odemeYap(tutar) bool
-    }
-    class HavaleEFT {
-        -String iban
-        -String bankaKodu
-        +odemeYap(tutar) bool
-    }
-    class Siparis {
-        +String siparisKodu
-        +Date olusturmaTarihi
-        +BigDecimal toplamTutar
-        +siparisOnayla() bool
-        +iptalEt() void
-    }
-    class Musteri {
-        +String adSoyad
-        +String ePosta
-        +girisYap() bool
-    }
-
-    OdemeYontemi <|.. KrediKarti : uygular
-    OdemeYontemi <|.. HavaleEFT : uygular
-    Musteri "1" --> "*" Siparis : verir
-    Siparis *-- "1" OdemeYontemi : icerir
-""",
-
-    "8. Durum Şeması - Kullanıcı Oturumu ve İşlem Döngüsü (State Diagram)": """stateDiagram-v2
+    "4. State Diagram - User Authentication & Session Lifecycle (State Diagram TD)": """stateDiagram-v2
     direction TD
-    [*] --> Beklemede: Sistem Başlatıldı
-    Beklemede --> KimlikDogrulama: Giriş Talebi
-    KimlikDogrulama --> Aktif: Şifre Doğrulandı (çğıöşü)
-    KimlikDogrulama --> Kilitli: Hatalı Giriş Denemesi (3x)
-    Kilitli --> Beklemede: Yönetici Sıfırlama Yaptı
-    Aktif --> IslemYapiliyor: Güvenli İşlem Seçildi
-    IslemYapiliyor --> Aktif: İşlem Başarıyla Tamamlandı
-    Aktif --> [*]: Güvenli Çıkış Yapıldı
-""",
-
-    "9. Varlık İlişki Şeması - E-Ticaret Veritabanı Mimarisi (ER Diagram)": """erDiagram
-    MUSTERI ||--o{ SIPARIS : verir
-    SIPARIS ||--|{ SIPARIS_DETAY : icerir
-    URUN ||--o{ SIPARIS_DETAY : listelenir
-    SIPARIS ||--|| ODEME : tamamlanir
-
-    MUSTERI {
-        string musteriId PK
-        string adSoyad
-        string eposta
-        string telefon
-    }
-
-    SIPARIS {
-        int siparisNo PK
-        string musteriId FK
-        datetime siparisTarihi
-        float toplamTutar
-        string durum
-    }
-
-    SIPARIS_DETAY {
-        int detayId PK
-        int siparisNo FK
-        string urunKodu FK
-        int adet
-        float birimFiyat
-    }
-
-    URUN {
-        string urunKodu PK
-        string urunAdi
-        float fiyat
-        int stokAdedi
-    }
-
-    ODEME {
-        string odemeId PK
-        int siparisNo FK
-        string odemeTuru
-        float tutar
-        datetime odemeZamani
-    }
+    [*] --> Idle: System Initialized
+    Idle --> Authenticating: Login Request
+    Authenticating --> Active: Credentials Verified
+    Authenticating --> Locked: Failed Attempts (3x)
+    Locked --> Idle: Admin Reset
+    Active --> Processing: User Selects Task
+    Processing --> Active: Task Completed
+    Active --> [*]: Secure Logout
 """
 }

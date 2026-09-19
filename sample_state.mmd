@@ -1,10 +1,10 @@
 stateDiagram-v2
     direction TD
-    [*] --> Beklemede: Sistem Başlatıldı
-    Beklemede --> KimlikDogrulama: Giriş Talebi
-    KimlikDogrulama --> Aktif: Şifre Doğrulandı (çğıöşü)
-    KimlikDogrulama --> Kilitli: Hatalı Giriş Denemesi (3x)
-    Kilitli --> Beklemede: Yönetici Sıfırlama Yaptı
-    Aktif --> IslemYapiliyor: Güvenli İşlem Seçildi
-    IslemYapiliyor --> Aktif: İşlem Başarıyla Tamamlandı
-    Aktif --> [*]: Güvenli Çıkış Yapıldı
+    [*] --> Idle: System Initialized
+    Idle --> Authenticating: Login Request
+    Authenticating --> Active: Credentials Verified
+    Authenticating --> Locked: Failed Attempts (3x)
+    Locked --> Idle: Admin Reset
+    Active --> Processing: User Selects Task
+    Processing --> Active: Task Completed
+    Active --> [*]: Secure Logout

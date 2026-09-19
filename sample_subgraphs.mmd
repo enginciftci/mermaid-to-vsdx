@@ -1,23 +1,23 @@
 flowchart LR
-    subgraph MUSTERI_PANELI ["Müşteri Ön Yüzü & Kimlik Doğrulama"]
-        A[Web Tarayıcı İstemcisi]
-        B[Mobil Uygulama iOS/Android]
+    subgraph CLIENT_TIER ["Client Applications & Auth"]
+        A[Web Browser Client]
+        B[Mobile App iOS & Android]
     end
 
-    subgraph AG_GECIDI ["API Ağ Geçidi (API Gateway)"]
-        GW[Tersine Dizin ve Güvenlik Duvarı]
+    subgraph API_GATEWAY ["API Gateway & Security"]
+        GW[Reverse Proxy & Firewall]
     end
 
-    subgraph MIKROSERVISLER ["İç İşlem Mikroservisleri"]
-        S1[Kullanıcı Servisi]
-        S2[Ödeme ve Provizyon Servisi]
-        S3[Bildirim ve Mesajlaşma Servisi]
+    subgraph SERVICES ["Core Processing Microservices"]
+        S1[User Account Service]
+        S2[Payment & Billing Service]
+        S3[Notification Service]
     end
 
-    subgraph VERI_KATMANI ["Güvenli Veritabanı Deposu"]
-        DB1[(PostgreSQL Müşteri Verisi)]
-        DB2[(Redis Önbellek Kümesi)]
-        DB3[(Kafka Olay Kuyruğu)]
+    subgraph DATA_LAYER ["Secure Database & Queue Cluster"]
+        DB1[(PostgreSQL Primary DB)]
+        DB2[(Redis In-Memory Cache)]
+        DB3[(Kafka Event Bus)]
     end
 
     A --> GW

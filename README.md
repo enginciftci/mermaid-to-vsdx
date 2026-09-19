@@ -21,13 +21,10 @@ Every diagram below is natively compiled into a real Microsoft Visio (`.vsdx`) d
 | :---: | :---: |
 | <img src="assets/microservices_subgraphs.png" width="420" alt="Microservices Architecture" /> | <img src="assets/flowchart_ecommerce.png" width="420" alt="E-Commerce Flowchart" /> |
 
-| UML Class Hierarchy | Entity-Relationship (ER) Model |
-| :---: | :---: |
-| <img src="assets/uml_class_diagram.png" width="420" alt="UML Class Diagram" /> | <img src="assets/er_diagram.png" width="420" alt="ER Diagram" /> |
-
-| State Machine Transition | Sequence Diagram |
-| :---: | :---: |
-| <img src="assets/state_diagram.png" width="420" alt="State Machine" /> | <img src="assets/sequence_diagram.png" width="420" alt="Sequence Diagram" /> |
+<p align="center">
+  <b>State Machine & Authentication Lifecycle</b><br/>
+  <img src="assets/state_diagram.png" width="400" alt="State Machine Diagram" />
+</p>
 
 ---
 
@@ -131,19 +128,19 @@ python main.py
 ## 🖥️ Using the Desktop GUI
 
 1. **Select a Preset or Enter Mermaid Code**:
-   - Use the **"Örnek Şablonlar"** dropdown to load sample diagrams (e-commerce flows, microservices with subgraphs, 2FA sequence diagrams, credit decision trees, or Turkish alphabet tests).
-   - Or paste your own Mermaid syntax directly into the code editor.
+   - Use the **"Sample Presets"** dropdown to load sample diagrams (e-commerce flows, microservices with subgraphs, loan decision trees, or user authentication state machines).
+   - Or paste your own Mermaid diagram syntax directly into the code editor.
 2. **Configure Styling**:
-   - **Renk Paleti**: Select from *Modern Corporate (Blue & Slate)*, *Emerald Tech (Mint & Teal)*, *Sunset Coral & Violet*, *Minimalist Slate*, or *Grayscale Clean (Black & White)*.
-   - **Unicode Yazı Tipi**: Choose *Segoe UI* (recommended), *Calibri*, or *Arial*.
+   - **Color Palette**: Select from *Modern Corporate (Blue & Slate)*, *Emerald Tech (Mint & Teal)*, *Sunset Coral & Violet*, *Minimalist Slate*, or *Grayscale Clean (Black & White)*.
+   - **Unicode Font**: Choose *Segoe UI* (recommended), *Calibri*, or *Arial*.
 3. **Generate & Verify**:
-   - Click **"🚀 Visio'ya Dönüştür (.vsdx)"**.
-   - The app parses the AST, invokes Visio COM in the background, applies styling and connector routing, saves the `.vsdx` into `output/`, and exports a high-resolution screenshot into `verification_output/`.
+   - Click **"🚀 Convert to Visio (.vsdx)"**.
+   - The app parses the AST, applies dynamic layout, connector routing, saves the `.vsdx` into `output/`, and exports a high-resolution screenshot into `verification_output/`.
 4. **Interactive Preview**:
    - The right panel displays the verified rendering immediately.
-   - Use **Yakınlaştır (+)**, **Uzaklaştır (-)**, **Ekrana Sığdır (Fit)**, or drag with the mouse to pan across large diagrams.
+   - Use **Zoom In (+)**, **Zoom Out (-)**, **Fit to Window (Fit)**, or drag with the mouse to pan across large diagrams.
 5. **Open in Visio**:
-   - Click **"📂 Çizimi Visio'da Aç"** to launch the file directly in Microsoft Visio.
+   - Click **"📂 Open in Visio"** to launch the file directly in Microsoft Visio with one click.
 
 ---
 

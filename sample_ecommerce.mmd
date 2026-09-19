@@ -1,12 +1,12 @@
 graph TD
-    A([Müşteri Siparişi Oluşturdu]) --> B[Ödeme Onayı Bekleniyor]
-    B --> C{Ödeme Başarılı mı?}
-    C -->|Evet: Kart Çekildi| D[(Sipariş Veritabanına Kaydet)]
-    C -->|Hayır: Yetersiz Bakiye| E[Kullanıcıya SMS ve E-Posta Bildirimi]
-    E --> F([İşlemi İptal Et])
+    A([Customer Places Order]) --> B[Payment Authorization Pending]
+    B --> C{Payment Successful?}
+    C -->|Yes: Card Charged| D[(Record Order in Database)]
+    C -->|No: Insufficient Funds| E[Send Email & SMS Notification]
+    E --> F([Cancel Order])
     
-    D --> G[Depo Hazırlık Birimine İlet]
-    G --> H[Fatura ve İrsaliye Düzenle]
-    H --> I[(Kargo Takip Sistemi)]
-    I --> J[Kuryeye Teslim Edildi]
-    J --> K([Müşteriye Teslim Edildi])
+    D --> G[Notify Warehouse Logistics]
+    G --> H[Generate Invoice & Waybill]
+    H --> I[(Shipment Tracking System)]
+    I --> J[Dispatched with Courier]
+    J --> K([Delivered to Customer])
