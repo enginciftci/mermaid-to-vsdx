@@ -32,18 +32,18 @@ Every diagram below is natively compiled into a real Microsoft Visio (`.vsdx`) d
 
 ---
 
-## 🤖 AI Agent Skill Integration (`SKILL.md`)
+## 🔌 Automation & Skill Integration (`SKILL.md`)
 
-This repository is equipped with an **AI Agent Skill** formatted for autonomous agents (such as **Antigravity**, **Claude Code**, **Cursor**, **Copilot**, and **LangChain**).
+This repository is equipped with a skill specification ([`SKILL.md`](SKILL.md)) for automated workflow runners and command-line automation.
 
-The complete agent instructions and protocol are available in:
+The complete instructions and protocol are available in:
 - **Root Specification**: [`SKILL.md`](SKILL.md)
 - **Modular Skill Folder**: [`skills/mermaid-to-visio/SKILL.md`](skills/mermaid-to-visio/SKILL.md)
 
-### What Agents Can Do:
+### Key Capabilities:
 1. **Autonomous Diagram Ingestion**: Extract ```` ```mermaid ```` code blocks directly from markdown documentation.
 2. **Zero-Dependency Headless Compilation**: Run `--engine native` in any cloud container, Linux server, or local environment without Microsoft Office.
-3. **Agentic Visual Verification Loop**: When Visio is present, invoke `--verify` to render a 300-DPI PNG screenshot into `verification_output/` and inspect layout accuracy using image inspection tools before completing tasks.
+3. **Automated Visual Verification Loop**: When Visio is present, invoke `--verify` to render a 300-DPI PNG screenshot into `verification_output/` and inspect layout accuracy using image inspection tools before completing tasks.
 4. **Professional Themes & Fonts**: Select appropriate palettes (`Modern Corporate`, `Emerald Tech`, `Sunset Coral`, `Minimalist Slate`, `Grayscale Clean`) and TrueType fonts (`Segoe UI`, `Calibri`, `Arial`).
 
 ```powershell
@@ -111,7 +111,7 @@ python main.py diagram.mmd -o output/diagram.vsdx --verify
 
 > **Prerequisites**: Python 3.10 or newer (`python --version`). Compatible with Windows, macOS, and Linux (Native OPC Engine).
 
-### Option A: Install Globally via Pip (Recommended for Agents & CLI)
+### Option A: Install Globally via Pip (Recommended for Automation & CLI)
 
 Install directly from GitHub to get the universal `mermaid-to-vsdx` command in your environment:
 
@@ -168,7 +168,7 @@ Dependencies in `requirements.txt`:
 
 ## 💻 Headless CLI Mode
 
-The converter can be run headlessly from the command line for automated workflows, agent pipelines, or CI/CD tasks:
+The converter can be run headlessly from the command line for automated workflows, build pipelines, or CI/CD tasks:
 
 ```powershell
 # Convert a Mermaid file (.mmd or .txt) to Visio with automatic visual verification
@@ -252,14 +252,14 @@ mermaid-to-vsdx/
 │       └── unicode_helper.py     # Turkish char analysis, NFC normalization, font helpers
 │
 ├── assets/                       # High-resolution showcase diagram screenshots
-├── skills/                       # Modular AI Agent skill package
+├── skills/                       # Modular skill package
 │   └── mermaid-to-visio/
 │       └── SKILL.md
 ├── main.py                       # Application entrypoint (GUI + CLI)
 ├── run.bat                       # One-click Windows 11 launcher
 ├── run.ps1                       # PowerShell launcher
 ├── requirements.txt              # Pip dependencies
-├── SKILL.md                      # AI Agent Skill specification
+├── SKILL.md                      # Automation skill specification
 ├── LICENSE                       # MIT License
 └── README.md                     # Documentation
 ```

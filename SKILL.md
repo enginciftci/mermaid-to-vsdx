@@ -5,15 +5,15 @@ description: Convert Mermaid diagrams (flowcharts, sequence diagrams, UML class 
 
 # Mermaid to Microsoft Visio (.vsdx) Converter Skill
 
-This skill equips AI coding agents (Antigravity, Claude Code, Cursor, Copilot, AutoGPT) with the capability to autonomously convert Mermaid diagram source code into professional, beautifully styled **Microsoft Visio (`.vsdx`) vector drawings**, with **100% Turkish character fidelity** (`ç, ğ, ı, ö, ş, ü, İ, Ç, Ğ, Ö, Ş, Ü`), dynamic orthogonal routing, and an **agentic visual verification loop**.
+This skill equips automated workflows and coding environments with the capability to autonomously convert Mermaid diagram source code into professional, beautifully styled **Microsoft Visio (`.vsdx`) vector drawings**, with **100% Turkish character fidelity** (`ç, ğ, ı, ö, ş, ü, İ, Ç, Ğ, Ö, Ş, Ü`), dynamic orthogonal routing, and an **automated visual verification loop**.
 
 ---
 
-## ⚡ Quick Agent Setup (One-Line Global Installation)
+## ⚡ Quick Setup (One-Line Global Installation)
 
 **Prerequisite**: Python 3.10 or newer (`python --version >= 3.10`).
 
-Any agent can install the CLI globally into its environment with:
+Install the CLI globally into your environment with:
 
 ```bash
 pip install git+https://github.com/enginciftci/mermaid-to-vsdx.git
@@ -32,15 +32,15 @@ python main.py diagram.mmd -o output/diagram.vsdx
 
 ---
 
-## 🧠 Instructions for AI Agents
+## 🧠 Automation Instructions
 
-When a user asks you to:
+When asked to:
 - Convert a flowchart, architecture diagram, sequence diagram, UML class diagram, ER diagram, or state machine into Microsoft Visio (`.vsdx`).
 - Create Visio drawings from text descriptions or Markdown documents.
 - Generate diagrams in headless environments (Linux servers, macOS, CI/CD pipelines, Docker containers) where Microsoft Office is not installed.
 - Ensure Turkish characters render flawlessly without glyph corruption or broken question marks (`?`).
 
-### The 5-Step Autonomous Agent Workflow
+### The 5-Step Workflow
 
 ```
 [1. Synthesize Mermaid] ──> [2. Save to .mmd] ──> [3. Run CLI Compiler] ──> [4. Verify Output] ──> [5. Deliver Links to User]
@@ -79,7 +79,7 @@ If running on Windows with Microsoft Visio installed, add `--verify` to capture 
 ```powershell
 mermaid-to-vsdx input_diagram.mmd -o output/diagram.vsdx --verify
 ```
-The screenshot will be saved in `verification_output/`. Use your file viewing tool (`view_file`) to inspect the exported PNG:
+The screenshot will be saved in `verification_output/`. Inspect the exported PNG to:
 - Confirm that labels are centered and fully legible.
 - Confirm all Turkish characters (`ç, ğ, ı, ö, ş, ü, İ, Ç, Ğ, Ö, Ş, Ü`) render without square boxes.
 - Confirm subgraph boundary boxes cleanly enclose their child nodes.
@@ -91,7 +91,7 @@ Provide clickable links in your markdown response:
 
 ---
 
-## 🛠️ CLI Reference for Agents
+## 🛠️ CLI Reference
 
 | Argument | Description | Default |
 | :--- | :--- | :--- |
@@ -105,9 +105,9 @@ Provide clickable links in your markdown response:
 
 ---
 
-## 💻 Programmatic Python API for Agents
+## 💻 Programmatic Python API
 
-Agents can also invoke the converter directly within Python scripts:
+You can also invoke the converter directly within Python scripts:
 
 ### Headless Native Compilation (Zero Visio Required):
 ```python

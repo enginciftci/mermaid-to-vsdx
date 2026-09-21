@@ -12,7 +12,7 @@ license = {text = "MIT"}
 authors = [
     {name = "Engin Ciftci"}
 ]
-keywords = ["mermaid", "visio", "vsdx", "diagram", "converter", "agent", "skills", "flowchart", "cli"]
+keywords = ["mermaid", "visio", "vsdx", "diagram", "converter", "flowchart", "cli", "vector-graphics"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Environment :: Console",

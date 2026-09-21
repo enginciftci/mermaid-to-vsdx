@@ -37,12 +37,12 @@ def build_core_props_xml() -> str:
                    xmlns:dc="http://purl.org/dc/elements/1.1/"
                    xmlns:dcterms="http://purl.org/dc/terms/"
                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-  <dc:title>Mermaid to Visio Diagram</dc:title>
-  <dc:creator>Headless Mermaid-to-Visio Native Compiler</dc:creator>
-  <cp:lastModifiedBy>Headless Mermaid-to-Visio Native Compiler</cp:lastModifiedBy>
+  <dc:title>Diagram</dc:title>
+  <dc:creator></dc:creator>
+  <cp:lastModifiedBy></cp:lastModifiedBy>
   <dcterms:created xsi:type="dcterms:W3CDTF">2026-09-19T00:00:00Z</dcterms:created>
   <dcterms:modified xsi:type="dcterms:W3CDTF">2026-09-19T00:00:00Z</dcterms:modified>
-  <dc:language>tr-TR</dc:language>
+  <dc:language>en-US</dc:language>
 </cp:coreProperties>"""
 
 
