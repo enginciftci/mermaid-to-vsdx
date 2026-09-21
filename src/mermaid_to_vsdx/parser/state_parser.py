@@ -36,12 +36,19 @@ class StateParser:
         states: Dict[str, StateNode] = {}
         transitions: List[StateTransition] = []
 
+        current_composite = None
+        notes: List[Any] = []
         initial_counter = 1
         terminal_counter = 1
 
         for line_num, line in lines[1:]:
             line_str = line.strip()
             if not line_str or line_str.startswith("%%"):
+                continue
+
+            # Composite state closing: }
+            if line_str == "}":
+                current_composite = None
                 continue
 
             # Direction directive
@@ -51,8 +58,28 @@ class StateParser:
                 direction = "TD" if d == "TB" else d
                 continue
 
+            # Note line: note [left of|right of] StateId : text
+            note_match = re.match(r'^note\s+(left\s+of|right\s+of)\s+([A-Za-z0-9_\-]+)\s*:\s*(.*)$', line_str, re.IGNORECASE)
+            if note_match:
+                from .ast_nodes import StateNote
+                notes.append(StateNote(
+                    placement=note_match.group(1).lower().strip(),
+                    state_id=note_match.group(2).strip(),
+                    text=clean_label_text(note_match.group(3))
+                ))
+                continue
+
             # Note blocks
             if line_str.lower().startswith("note ") or line_str.lower() == "end note":
+                continue
+
+            # Composite state opening: state StateName {
+            comp_match = re.match(r'^state\s+([A-Za-z0-9_\-]+)\s*\{$', line_str, re.IGNORECASE)
+            if comp_match:
+                cid = comp_match.group(1).strip()
+                if cid not in states:
+                    states[cid] = StateNode(id=cid, label=clean_label_text(cid), node_type=StateNodeType.STATE)
+                current_composite = cid
                 continue
 
             # State definition with alias: state "Label Here" as s1
@@ -122,4 +149,4 @@ class StateParser:
                 ))
                 continue
 
-        return StateDiagram(direction=direction, states=states, transitions=transitions)
+        return StateDiagram(direction=direction, states=states, transitions=transitions, notes=notes)

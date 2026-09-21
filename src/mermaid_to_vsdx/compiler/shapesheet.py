@@ -332,14 +332,14 @@ def get_shape_geometry_xml(shape_type: str, width: float, height: float, roundin
   </Row>
 </Section>"""
         if st == "double_circle":
-            w065 = round(width * 0.65, 4)
-            h065 = round(height * 0.65, 4)
+            w08 = round(width * 0.8, 4)
+            h08 = round(height * 0.8, 4)
             sec1 = f"""<Section N='Geometry' IX='1'>
-  <Cell N='NoFill' V='0'/><Cell N='NoLine' V='0'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
+  <Cell N='NoFill' V='1'/><Cell N='NoLine' V='0'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
   <Row T='Ellipse' IX='1'>
     <Cell N='X' V='{w05}' F='Width*0.5'/><Cell N='Y' V='{h05}' F='Height*0.5'/>
-    <Cell N='A' V='{w065}' F='Width*0.65'/><Cell N='B' V='{h05}' F='Height*0.5'/>
-    <Cell N='C' V='{w05}' F='Width*0.5'/><Cell N='D' V='{h065}' F='Height*0.65'/>
+    <Cell N='A' V='{w08}' F='Width*0.8'/><Cell N='B' V='{h05}' F='Height*0.5'/>
+    <Cell N='C' V='{w05}' F='Width*0.5'/><Cell N='D' V='{h08}' F='Height*0.8'/>
   </Row>
 </Section>"""
             return sec0 + "\n" + sec1
@@ -503,6 +503,7 @@ def build_2d_shape_xml(
     font_name: str = "Segoe UI",
     font_size_pt: float = 10.0,
     align_left: bool = False,
+    bold: bool = False,
     is_container: bool = False,
     has_connections: bool = True,
     extra_connections: Optional[List[Tuple[str, float, float, str, str]]] = None,
@@ -516,58 +517,45 @@ def build_2d_shape_xml(
 
     fill_hex = rgb_to_hex(fill_color)
     line_hex = rgb_to_hex(line_color)
-
-    # If font background (fill_color) is black or dark, font face MUST be white
-    if is_dark_color(fill_color):
-        text_color = "#ffffff"
-
     text_hex = rgb_to_hex(text_color)
+    st = shape_type.lower() if shape_type else "rectangle"
 
     cells = [
         build_cell("PinX", str(pin_x)),
         build_cell("PinY", str(pin_y)),
         build_cell("Width", str(width)),
         build_cell("Height", str(height)),
-        build_cell("LocPinX", str(width * 0.5), "Width*0.5"),
-        build_cell("LocPinY", str(height * 0.5), "Height*0.5"),
+        build_cell("LocPinX", str(round(width * 0.5, 4)), "Width*0.5"),
+        build_cell("LocPinY", str(round(height * 0.5, 4)), "Height*0.5"),
         build_cell("Angle", "0"),
-        build_cell("FlipX", "0"),
-        build_cell("FlipY", "0"),
-        build_cell("FillForegnd", fill_hex),
         build_cell("FillPattern", str(fill_pattern)),
+        build_cell("FillForegnd", fill_hex),
+        build_cell("FillBkgnd", "#ffffff"),
         build_cell("LineWeight", str(line_weight_in), unit="PT"),
         build_cell("LineColor", line_hex),
-        build_cell("LinePattern", str(line_pattern)),
-    ]
-
-    if rounding_in > 0:
-        cells.append(build_cell("Rounding", str(rounding_in), unit="IN"))
-    elif shape_type.lower() == "stadium":
-        cells.append(build_cell("Rounding", str(height * 0.5), "Height*0.5", unit="IN"))
-    elif shape_type.lower() == "rounded":
-        cells.append(build_cell("Rounding", "0.125", unit="IN"))
-
-    # Text transform: strictly centered in shape box
-    cells.extend([
-        build_cell("TxtPinX", str(width * 0.5), "Width*0.5"),
-        build_cell("TxtPinY", str(height * 0.5), "Height*0.5"),
-        build_cell("TxtWidth", str(width), "Width"),
-        build_cell("TxtHeight", str(height), "Height"),
-        build_cell("TxtLocPinX", str(width * 0.5), "TxtWidth*0.5"),
-        build_cell("TxtLocPinY", str(height * 0.5), "TxtHeight*0.5"),
+        build_cell("LinePattern", str(line_pattern), f"GUARD({line_pattern})" if line_pattern != 1 else None),
+        build_cell("Rounding", str(rounding_in), unit="IN"),
+        build_cell("TextBkgnd", "0"),
+        build_cell("TxtWidth", str(width), "Width*1"),
+        build_cell("TxtHeight", str(height), "Height*1"),
+        build_cell("TxtLocPinX", str(round(width * 0.5, 4)), "TxtWidth*0.5"),
+        build_cell("TxtLocPinY", str(round(height * 0.5, 4)), "TxtHeight*0.5"),
+        build_cell("TxtPinX", str(round(width * 0.5, 4)), "Width*0.5"),
+        build_cell("TxtPinY", str(round(height * 0.5, 4)), "Height*0.5"),
         build_cell("TxtAngle", "0"),
         build_cell("ObjType", "1"),
-    ])
+    ]
 
     user_section = ""
     if is_container:
         user_section = """<Section N='User'><Row N='msvStructureType'><Cell N='Value' V='Container'/></Row></Section>"""
 
+    font_style = "1" if bold else "0"
     char_section = f"""<Section N='Character'><Row IX='0'>
   <Cell N='Color' V='{text_hex}'/>
   <Cell N='Font' V='{font_name}'/>
   <Cell N='Size' V='{font_size_pt / 72.0}' U='IN'/>
-  <Cell N='Style' V='0'/>
+  <Cell N='Style' V='{font_style}'/>
 </Row></Section>"""
 
     para_section = f"""<Section N='Paragraph'><Row IX='0'>
@@ -828,7 +816,7 @@ def build_1d_connector_xml(
         build_cell("FillBkgnd", "0"),
         build_cell("LineWeight", str(line_weight_in), unit="PT"),
         build_cell("LineColor", line_hex),
-        build_cell("LinePattern", str(line_pattern)),
+        build_cell("LinePattern", str(line_pattern), f"GUARD({line_pattern})" if line_pattern != 1 else None),
         build_cell("BeginArrow", str(begin_arrow)),
         build_cell("EndArrow", str(end_arrow)),
         build_cell("EndArrowSize", str(end_arrow_size)),
@@ -1014,3 +1002,82 @@ def build_connect_records(
 <Connect FromSheet='{connector_id}' FromCell='EndX' FromPart='12' ToSheet='{target_shape_id}' ToCell='Connections.{dst_port}.X' ToPart='{dp}'/>"""
     return f"""<Connect FromSheet='{connector_id}' FromCell='BeginX' FromPart='9' ToSheet='{source_shape_id}' ToCell='PinX' ToPart='3'/>
 <Connect FromSheet='{connector_id}' FromCell='EndX' FromPart='12' ToSheet='{target_shape_id}' ToCell='PinX' ToPart='3'/>"""
+
+
+def build_self_loop_xml(
+    connector_id: int,
+    px: float,
+    start_y: float,
+    label: str = "",
+    loop_w: float = 0.75,
+    loop_h: float = 0.40,
+    line_color: str = "#475569",
+    line_weight_in: float = 0.018,
+    line_pattern: int = 1,
+    end_arrow: int = 13,
+    end_arrow_size: int = 2,
+    font_name: str = "Segoe UI",
+    font_size_pt: float = 9.0,
+    text_color: str = "#1e293b",
+    text_bkgnd: str = "#ffffff",
+) -> str:
+    """
+    Renders a 3-segment orthogonal loopback connector for self-calling messages in sequence diagrams.
+    Starts at (px, start_y), goes right to px + loop_w, drops down to start_y - loop_h,
+    and returns left to px with an arrowhead pointing left.
+    """
+    pin_x = round(px + loop_w / 2.0, 4)
+    pin_y = round(start_y - loop_h / 2.0, 4)
+    w = round(loop_w, 4)
+    h = round(loop_h, 4)
+    line_hex = rgb_to_hex(line_color)
+    text_hex = rgb_to_hex(text_color)
+    text_bkgnd_hex = rgb_to_hex(text_bkgnd)
+    escaped_label = escape_xml(label)
+    shape_name = f"Line.SelfLoop.{connector_id}"
+
+    text_element = f"<Text><cp IX='0'/><pp IX='0'/>{escaped_label}</Text>" if label else ""
+
+    return f"""<Shape ID='{connector_id}' NameU='{shape_name}' Name='{shape_name}' Type='Shape' LineStyle='0' FillStyle='0' TextStyle='0'>
+  <Cell N='PinX' V='{pin_x}'/>
+  <Cell N='PinY' V='{pin_y}'/>
+  <Cell N='Width' V='{w}'/>
+  <Cell N='Height' V='{h}'/>
+  <Cell N='LocPinX' V='{round(w * 0.5, 4)}' F='Width*0.5'/>
+  <Cell N='LocPinY' V='{round(h * 0.5, 4)}' F='Height*0.5'/>
+  <Cell N='Angle' V='0'/>
+  <Cell N='LineWeight' V='{line_weight_in}' U='PT'/>
+  <Cell N='LineColor' V='{line_hex}'/>
+  <Cell N='LinePattern' V='{line_pattern}' F='GUARD({line_pattern})'/>
+  <Cell N='BeginArrow' V='0'/>
+  <Cell N='EndArrow' V='{end_arrow}'/>
+  <Cell N='EndArrowSize' V='{end_arrow_size}'/>
+  <Cell N='FillPattern' V='0'/>
+  <Cell N='FillForegnd' V='0'/>
+  <Cell N='FillBkgnd' V='0'/>
+  <Cell N='ObjType' V='1'/>
+  <Cell N='TextBkgnd' V='{text_bkgnd_hex}'/>
+  <Cell N='TxtWidth' V='1.6' F='TEXTWIDTH(TheText)+8 pt'/>
+  <Cell N='TxtHeight' V='0.35' F='TEXTHEIGHT(TheText, TxtWidth)'/>
+  <Cell N='TxtLocPinX' V='0.8' F='TxtWidth*0.5'/>
+  <Cell N='TxtLocPinY' V='0.175' F='TxtHeight*0.5'/>
+  <Cell N='TxtPinX' V='{round(w * 0.5 + 0.1, 4)}' F='Width*0.5+8 pt'/>
+  <Cell N='TxtPinY' V='{round(h + 0.18, 4)}' F='Height*1+12 pt'/>
+  <Cell N='TxtAngle' V='0'/>
+  <Section N='Character'><Row IX='0'>
+    <Cell N='Color' V='{text_hex}'/>
+    <Cell N='Font' V='{font_name}'/>
+    <Cell N='Size' V='{font_size_pt / 72.0}' U='IN'/>
+  </Row></Section>
+  <Section N='Paragraph'><Row IX='0'>
+    <Cell N='HorzAlign' V='0'/>
+  </Row></Section>
+  <Section N='Geometry' IX='0'>
+    <Cell N='NoFill' V='1'/><Cell N='NoLine' V='0'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
+    <Row T='MoveTo' IX='1'><Cell N='X' V='0'/><Cell N='Y' V='{h}' F='Height*1'/></Row>
+    <Row T='LineTo' IX='2'><Cell N='X' V='{w}' F='Width*1'/><Cell N='Y' V='{h}' F='Height*1'/></Row>
+    <Row T='LineTo' IX='3'><Cell N='X' V='{w}' F='Width*1'/><Cell N='Y' V='0'/></Row>
+    <Row T='LineTo' IX='4'><Cell N='X' V='0'/><Cell N='Y' V='0'/></Row>
+  </Section>
+  {text_element}
+</Shape>"""

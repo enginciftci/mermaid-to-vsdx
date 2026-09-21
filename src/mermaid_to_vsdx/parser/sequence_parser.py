@@ -6,7 +6,7 @@ Parses sequence diagrams into SequenceDiagram AST models.
 import re
 from typing import List, Optional
 from .ast_nodes import (
-    SequenceDiagram, Participant, Message, Note, MessageArrow, Activation
+    SequenceDiagram, Participant, Message, Note, MessageArrow, Activation, LoopBlock
 )
 from .base_parser import MermaidParseError, preprocess_lines
 from ..utils.unicode_helper import clean_label_text, ensure_utf8
@@ -31,6 +31,7 @@ class SequenceParser:
     def __init__(self):
         self.diagram = SequenceDiagram()
         self.participant_order: List[str] = []
+        self.block_stack: List[LoopBlock] = []
 
     def parse(self, text: str) -> SequenceDiagram:
         text = ensure_utf8(text)
@@ -41,6 +42,10 @@ class SequenceParser:
         first_line_num, first_line = raw_lines[0]
         if not re.match(r'^sequenceDiagram\b', first_line, re.IGNORECASE):
             raise MermaidParseError(f"Expected 'sequenceDiagram' header, got '{first_line}'", first_line_num, first_line)
+
+        self.diagram = SequenceDiagram()
+        self.participant_order = []
+        self.block_stack = []
 
         for line_num, line in raw_lines[1:]:
             self._parse_line(line, line_num)
@@ -78,7 +83,7 @@ class SequenceParser:
             action = m_act.group(1).lower()
             part_id = m_act.group(2)
             self._ensure_participant_exists(part_id)
-            self.diagram.items.append(Activation(
+            self._add_item(Activation(
                 participant_id=part_id,
                 is_activate=(action == "activate")
             ))
@@ -95,11 +100,31 @@ class SequenceParser:
             for a in actors:
                 self._ensure_participant_exists(a)
                 
-            self.diagram.items.append(Note(
+            self._add_item(Note(
                 placement=placement,
                 participant_ids=actors,
                 text=note_text
             ))
+            return
+
+        # Check Block start (loop, alt, opt, par, critical, rect)
+        m_block = re.match(r'^(loop|alt|opt|par|critical|rect)(\s+(.*))?$', line, re.IGNORECASE)
+        if m_block:
+            b_type = m_block.group(1).lower()
+            b_title = clean_label_text(m_block.group(3) or "")
+            blk = LoopBlock(title=b_title, block_type=b_type)
+            self._add_item(blk)
+            self.block_stack.append(blk)
+            return
+
+        # Check Block end
+        if re.match(r'^end\b', line, re.IGNORECASE):
+            if self.block_stack:
+                self.block_stack.pop()
+            return
+
+        # Check divider / else
+        if re.match(r'^else\b', line, re.IGNORECASE):
             return
 
         # Check Message
@@ -135,7 +160,7 @@ class SequenceParser:
                         self._ensure_participant_exists(sender_raw)
                         self._ensure_participant_exists(receiver_raw)
 
-                        self.diagram.items.append(Message(
+                        self._add_item(Message(
                             sender_id=sender_raw,
                             receiver_id=receiver_raw,
                             text=clean_label_text(text_raw),
@@ -145,12 +170,13 @@ class SequenceParser:
                         ))
                         return
 
-        # If we reach here, unhandled or invalid statement
-        # Check if it's a known non-critical block like loop, alt, opt, par, end
-        if re.match(r'^(loop|alt|opt|par|critical|rect|end|else)\b', line, re.IGNORECASE):
-            return
-
         raise MermaidParseError(f"Unrecognized sequence diagram statement: '{line}'", line_num, line)
+
+    def _add_item(self, item):
+        if self.block_stack:
+            self.block_stack[-1].items.append(item)
+        else:
+            self.diagram.items.append(item)
 
     def _add_participant(self, part_id: str, label: str, is_actor: bool = False):
         for p in self.diagram.participants:

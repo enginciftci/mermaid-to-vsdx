@@ -12,6 +12,7 @@ from .sequence_compiler import compile_sequence_to_vsdx
 from .class_compiler import compile_class_diagram_to_vsdx
 from .state_compiler import compile_state_diagram_to_vsdx
 from .er_compiler import compile_er_diagram_to_vsdx
+from .block_compiler import compile_block_to_vsdx
 
 
 def compile_mermaid_to_vsdx(
@@ -36,6 +37,8 @@ def compile_mermaid_to_vsdx(
         path = compile_state_diagram_to_vsdx(ast, output_path, palette_name, font_name)
     elif dtype == DiagramType.ER_DIAGRAM:
         path = compile_er_diagram_to_vsdx(ast, output_path, palette_name, font_name)
+    elif dtype == DiagramType.BLOCK:
+        path = compile_block_to_vsdx(ast, output_path, palette_name, font_name)
     else:
         raise ValueError(f"Unsupported diagram type for native compilation: {dtype}")
 
@@ -49,4 +52,5 @@ __all__ = [
     "compile_class_diagram_to_vsdx",
     "compile_state_diagram_to_vsdx",
     "compile_er_diagram_to_vsdx",
+    "compile_block_to_vsdx",
 ]

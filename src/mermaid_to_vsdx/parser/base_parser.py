@@ -52,9 +52,15 @@ def detect_diagram_type(mermaid_code: str) -> DiagramType:
     Automatically un-fences Markdown code blocks if present.
     """
     code = extract_mermaid_from_markdown(mermaid_code)
+    in_frontmatter = False
     for raw_line in code.splitlines():
         line = raw_line.strip()
         if not line or line.startswith("%%"):
+            continue
+        if line == "---":
+            in_frontmatter = not in_frontmatter
+            continue
+        if in_frontmatter:
             continue
         line_lower = line.lower()
         if line_lower.startswith(("graph", "flowchart")):
@@ -67,6 +73,8 @@ def detect_diagram_type(mermaid_code: str) -> DiagramType:
             return DiagramType.STATE_DIAGRAM
         elif line_lower.startswith("erdiagram"):
             return DiagramType.ER_DIAGRAM
+        elif line_lower.startswith("block"):
+            return DiagramType.BLOCK
         else:
             return DiagramType.UNKNOWN
     return DiagramType.UNKNOWN
@@ -75,14 +83,20 @@ def detect_diagram_type(mermaid_code: str) -> DiagramType:
 def preprocess_lines(mermaid_code: str) -> List[Tuple[int, str]]:
     """
     Returns a list of (1-indexed line_number, stripped_line),
-    ignoring empty lines and comment lines (%%).
+    ignoring empty lines, comment lines (%%), and YAML frontmatter (---).
     Automatically extracts Mermaid block if Markdown input.
     """
     code = extract_mermaid_from_markdown(mermaid_code)
     lines = []
+    in_frontmatter = False
     for idx, raw_line in enumerate(code.splitlines(), start=1):
         line = raw_line.strip()
         if not line or line.startswith("%%"):
+            continue
+        if line == "---":
+            in_frontmatter = not in_frontmatter
+            continue
+        if in_frontmatter:
             continue
         lines.append((idx, line))
     return lines

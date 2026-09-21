@@ -213,10 +213,9 @@ class TestDrawingQualityFeatures(unittest.TestCase):
         compile_state_diagram_to_vsdx(st_diag, st_vsdx)
         st_xml = self._get_page_xml(st_vsdx)
 
-        # Terminal state shape with double_circle
-        self.assertIn("<Section N='Geometry' IX='0'>", st_xml)
-        self.assertIn("<Section N='Geometry' IX='1'>", st_xml)
-        # Inner disc filled
+        # Terminal state group shape with clean outer ring and solid dark inner disc
+        self.assertIn("EndOuter_", st_xml)
+        self.assertIn("EndInner_", st_xml)
         self.assertIn("<Cell N='NoFill' V='0'/>", st_xml)
 
     # Item 9: Subgraph headroom prevents header overlap

@@ -53,7 +53,7 @@ def convert_mermaid_to_visio(
         builder = ClassBuilder(ast, palette=palette, font_name=font_name)
         path = builder.build_and_save(output_vsdx_path)
         return diag_type, path
-    elif diag_type in (DiagramType.STATE_DIAGRAM, DiagramType.ER_DIAGRAM):
+    elif diag_type in (DiagramType.STATE_DIAGRAM, DiagramType.ER_DIAGRAM, DiagramType.BLOCK):
         from ..compiler import compile_mermaid_to_vsdx
         return compile_mermaid_to_vsdx(
             mermaid_code=mermaid_code,

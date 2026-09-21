@@ -36,7 +36,8 @@ def compile_class_diagram_to_vsdx(
         meths = [m for m in cls.members if m.is_method]
         class_members_split[cid] = (attrs, meths)
 
-        all_lines = [cls.name]
+        c_title = cls.display_label if cls.display_label else cls.name
+        all_lines = [c_title]
         if cls.annotation:
             all_lines.insert(0, f"<<{cls.annotation}>>")
         for a in attrs:
@@ -61,9 +62,9 @@ def compile_class_diagram_to_vsdx(
     # 2. Extract relationships
     edges = [(rel.source_name, rel.target_name) for rel in diagram.relationships]
 
-    # 3. Layout engine (Class diagrams typically flow Top-Down)
+    # 3. Layout engine (respect diagram.direction: TD, LR, RL, BT)
     layout_engine = SugiyamaLayoutEngine(
-        direction="TD",
+        direction=diagram.direction,
         rank_gap=1.2,
         node_gap=0.8,
         page_margin=1.0,
@@ -115,7 +116,8 @@ def compile_class_diagram_to_vsdx(
         ))
 
         # Child 2: Title compartment at top (transparent text box)
-        title_lines = [f"<<{cls.annotation}>>", cls.name] if cls.annotation else [cls.name]
+        c_title = cls.display_label if cls.display_label else cls.name
+        title_lines = [f"<<{cls.annotation}>>", c_title] if cls.annotation else [c_title]
         title_text = "\n".join(title_lines)
         title_h = 0.55 if cls.annotation else 0.4
         title_pin_y = round(h - title_h * 0.5, 4)
@@ -303,7 +305,7 @@ def compile_class_diagram_to_vsdx(
             dst_y=dst_pos.pin_y,
             dst_w=dst_pos.width,
             dst_h=dst_pos.height,
-            direction="TD",
+            direction=diagram.direction,
         )
 
         shapes_xml_list.append(build_1d_connector_xml(
@@ -327,7 +329,7 @@ def compile_class_diagram_to_vsdx(
             target_shape_id=dst_s_id,
             src_port=src_port,
             dst_port=dst_port,
-            routing_direction="TD",
+            routing_direction=diagram.direction,
             intermediate_waypoints=layout_res.edge_routes.get((rel.source_name, rel.target_name), []),
         ))
 

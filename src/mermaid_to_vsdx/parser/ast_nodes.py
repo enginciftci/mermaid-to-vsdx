@@ -13,6 +13,7 @@ class DiagramType(Enum):
     CLASS_DIAGRAM = auto()
     STATE_DIAGRAM = auto()
     ER_DIAGRAM = auto()
+    BLOCK = auto()
     UNKNOWN = auto()
 
 
@@ -27,7 +28,11 @@ class ShapeType(Enum):
     DIAMOND = "diamond"              # {text}
     HEXAGON = "hexagon"              # {{text}}
     PARALLELOGRAM = "parallelogram"  # [/text/] or [\text\]
+    PARALLELOGRAM_ALT = "parallelogram_left"
     TRAPEZOID = "trapezoid"          # [/text\] or [\text/]
+    TRAPEZOID_ALT = "trapezoid"
+    DOUBLE_CIRCLE = "double_circle"
+    ROUNDED_RECT = "rounded"
 
 
 class EdgeStyle(Enum):
@@ -121,10 +126,17 @@ class Activation:
 
 
 @dataclass
+class LoopBlock:
+    title: str = ""
+    block_type: str = "loop"
+    items: List[Union["Message", "Note", "Activation", "LoopBlock"]] = field(default_factory=list)
+
+
+@dataclass
 class SequenceDiagram:
     title: str = ""
     participants: List[Participant] = field(default_factory=list)
-    items: List[Union[Message, Note, Activation]] = field(default_factory=list)
+    items: List[Union[Message, Note, Activation, LoopBlock]] = field(default_factory=list)
 
 
 # --- Class Diagram Models ---
@@ -153,7 +165,14 @@ class ClassMember:
 class ClassNode:
     name: str
     annotation: str = ""        # <<interface>>, <<abstract>>, <<service>>, etc.
+    display_label: str = ""     # class Name["Display Label"]
     members: List[ClassMember] = field(default_factory=list)
+
+
+@dataclass
+class ClassNote:
+    text: str
+    target_class: Optional[str] = None
 
 
 @dataclass
@@ -169,8 +188,10 @@ class ClassRelationship:
 @dataclass
 class ClassDiagram:
     title: str = ""
+    direction: str = "TD"
     classes: Dict[str, ClassNode] = field(default_factory=dict)
     relationships: List[ClassRelationship] = field(default_factory=list)
+    notes: List[ClassNote] = field(default_factory=list)
 
 
 # --- State Diagram Models ---
@@ -190,6 +211,14 @@ class StateNode:
     label: str
     node_type: StateNodeType = StateNodeType.STATE
     description: str = ""
+    children: List[str] = field(default_factory=list)
+
+
+@dataclass
+class StateNote:
+    placement: str  # "left of", "right of"
+    state_id: str
+    text: str
 
 
 @dataclass
@@ -204,6 +233,7 @@ class StateDiagram:
     direction: str = "TD"
     states: Dict[str, StateNode] = field(default_factory=dict)
     transitions: List[StateTransition] = field(default_factory=list)
+    notes: List[StateNote] = field(default_factory=list)
 
 
 # --- ER Diagram Models ---
@@ -236,4 +266,36 @@ class ERDiagram:
     title: str = ""
     entities: Dict[str, EREntity] = field(default_factory=dict)
     relationships: List[ERRelationship] = field(default_factory=list)
+
+
+# --- Block Diagram Models ---
+
+@dataclass
+class BlockNode:
+    id: str
+    label: str = ""
+    shape: ShapeType = ShapeType.RECTANGLE
+    width_cols: int = 1
+    is_space: bool = False
+    children: List["BlockNode"] = field(default_factory=list)
+    columns: Optional[int] = None
+    style: Dict[str, str] = field(default_factory=dict)
+    classes: List[str] = field(default_factory=list)
+
+
+@dataclass
+class BlockEdge:
+    source_id: str
+    target_id: str
+    label: str = ""
+    style: EdgeStyle = EdgeStyle.SOLID
+    has_arrow: bool = True
+
+
+@dataclass
+class BlockDiagram:
+    columns: int = 1
+    blocks: List[BlockNode] = field(default_factory=list)
+    edges: List[BlockEdge] = field(default_factory=list)
+    class_defs: Dict[str, Dict[str, str]] = field(default_factory=dict)
 

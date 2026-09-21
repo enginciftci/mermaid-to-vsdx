@@ -13,6 +13,37 @@ from typing import Dict, Any, Optional
 from PIL import Image, ImageDraw, ImageFont
 
 
+def draw_dashed_line(draw: ImageDraw.ImageDraw, p1, p2, fill, width, dash_len=8, gap_len=5):
+    x1, y1 = p1
+    x2, y2 = p2
+    dx = x2 - x1
+    dy = y2 - y1
+    dist = math.hypot(dx, dy)
+    if dist < 1e-3:
+        return
+    vx = dx / dist
+    vy = dy / dist
+    cur = 0.0
+    while cur < dist:
+        seg_end = min(cur + dash_len, dist)
+        sp1 = (x1 + vx * cur, y1 + vy * cur)
+        sp2 = (x1 + vx * seg_end, y1 + vy * seg_end)
+        draw.line([sp1, sp2], fill=fill, width=width)
+        cur += dash_len + gap_len
+
+
+def draw_dashed_rect(draw: ImageDraw.ImageDraw, tl, br, fill, outline, width, dash_len=8, gap_len=5):
+    x1, y1 = tl
+    x2, y2 = br
+    if fill:
+        draw.rectangle([tl, br], fill=fill)
+    if outline:
+        draw_dashed_line(draw, (x1, y1), (x2, y1), fill=outline, width=width, dash_len=dash_len, gap_len=gap_len)
+        draw_dashed_line(draw, (x2, y1), (x2, y2), fill=outline, width=width, dash_len=dash_len, gap_len=gap_len)
+        draw_dashed_line(draw, (x2, y2), (x1, y2), fill=outline, width=width, dash_len=dash_len, gap_len=gap_len)
+        draw_dashed_line(draw, (x1, y2), (x1, y1), fill=outline, width=width, dash_len=dash_len, gap_len=gap_len)
+
+
 def render_vsdx_to_png(
     vsdx_path: str,
     output_image_path: Optional[str] = None,
@@ -87,36 +118,80 @@ def render_vsdx_to_png(
     def to_img(x_in: float, y_in: float):
         return (x_in * dpi, (ph_in - y_in) * dpi)
 
-    shapes = list(root_p1.findall('.//{*}Shape'))
+    shapes_to_render = []
 
-    # Layering order: Containers first, 2D shapes next, Connectors on top
-    def shape_sort_key(s):
-        nu = s.attrib.get('NameU', '').lower()
-        if 'container' in nu or 'subgraph' in nu:
-            return 0
-        elif 'connector' in nu or 'line' in nu:
-            return 2
-        return 1
-
-    shapes.sort(key=shape_sort_key)
-
-    for shape in shapes:
-        name_u = shape.attrib.get('NameU', '')
-        cells = {c.attrib.get('N'): c.attrib.get('V', '') for c in shape.findall('{*}Cell')}
-
+    def collect_shapes(shape_elem, parent_ox=0.0, parent_oy=0.0):
+        name_u = shape_elem.attrib.get('NameU', '')
+        cells = {c.attrib.get('N'): c.attrib.get('V', '') for c in shape_elem.findall('{*}Cell')}
         try:
             pin_x = float(cells.get('PinX', 0))
             pin_y = float(cells.get('PinY', 0))
             w = float(cells.get('Width', 0))
             h = float(cells.get('Height', 0))
-        except ValueError:
-            continue
+        except (ValueError, TypeError):
+            return
+
+        abs_pin_x = parent_ox + pin_x
+        abs_pin_y = parent_oy + pin_y
+
+        child_shapes_elem = shape_elem.find('{*}Shapes')
+        has_children = child_shapes_elem is not None and len(child_shapes_elem.findall('{*}Shape')) > 0
+
+        line_pat = cells.get('LinePattern', '1')
+        fill_pat = int(cells.get('FillPattern', '1') or '1')
+        is_transparent_group = has_children and line_pat == '0' and fill_pat == 0
+
+        if not is_transparent_group:
+            shapes_to_render.append({
+                'elem': shape_elem,
+                'name_u': name_u,
+                'cells': cells,
+                'pin_x': abs_pin_x,
+                'pin_y': abs_pin_y,
+                'w': w,
+                'h': h,
+            })
+
+        if has_children:
+            child_ox = abs_pin_x - w / 2.0
+            child_oy = abs_pin_y - h / 2.0
+            for child in child_shapes_elem.findall('{*}Shape'):
+                collect_shapes(child, child_ox, child_oy)
+
+    shapes_container = root_p1.find('{*}Shapes')
+    if shapes_container is not None:
+        for s in shapes_container.findall('{*}Shape'):
+            collect_shapes(s, 0.0, 0.0)
+    else:
+        for s in root_p1.findall('{*}Shape'):
+            collect_shapes(s, 0.0, 0.0)
+
+    # Layering order: Containers first, 2D shapes next, Connectors on top
+    def shape_sort_key(s_info):
+        nu = s_info['name_u'].lower()
+        if 'container' in nu or 'subgraph' in nu or 'loop' in nu or 'block' in nu:
+            return 0
+        elif 'connector' in nu or 'line' in nu or 'message' in nu:
+            return 2
+        return 1
+
+    shapes_to_render.sort(key=shape_sort_key)
+
+    for s_info in shapes_to_render:
+        shape = s_info['elem']
+        name_u = s_info['name_u']
+        cells = s_info['cells']
+        pin_x = s_info['pin_x']
+        pin_y = s_info['pin_y']
+        w = s_info['w']
+        h = s_info['h']
 
         fill_col = cells.get('FillForegnd', '#ffffff')
         line_col = cells.get('LineColor', '#334155')
         fill_pat = int(cells.get('FillPattern', '1') or '1')
-        is_conn = 'connector' in name_u.lower() or 'line' in name_u.lower()
-        is_container = 'container' in name_u.lower() or 'subgraph' in name_u.lower()
+        line_pat = cells.get('LinePattern', '1')
+        is_conn = 'connector' in name_u.lower() or 'line' in name_u.lower() or 'message' in name_u.lower()
+        is_container = 'container' in name_u.lower() or 'subgraph' in name_u.lower() or 'loop' in name_u.lower() or 'block' in name_u.lower()
 
         # Extract Geometry points
         geom_sec = shape.find(".//{*}Section[@N='Geometry']")
@@ -136,7 +211,10 @@ def render_vsdx_to_png(
             line_w = max(2, int(0.018 * dpi))
             if len(geom_pts) >= 2:
                 for i in range(len(geom_pts) - 1):
-                    draw.line([geom_pts[i], geom_pts[i+1]], fill=line_col, width=line_w)
+                    if line_pat in ('2', '3'):
+                        draw_dashed_line(draw, geom_pts[i], geom_pts[i+1], fill=line_col, width=line_w)
+                    else:
+                        draw.line([geom_pts[i], geom_pts[i+1]], fill=line_col, width=line_w)
 
                 # End Arrow
                 if cells.get('EndArrow', '0') not in ('0', '') and len(geom_pts) >= 2:
@@ -156,14 +234,20 @@ def render_vsdx_to_png(
             if is_container:
                 tl = to_img(pin_x - w/2.0, pin_y + h/2.0)
                 br = to_img(pin_x + w/2.0, pin_y - h/2.0)
-                draw.rounded_rectangle([tl, br], radius=8, fill=f_col, outline=line_col, width=border_w)
+                if line_pat in ('2', '3'):
+                    draw_dashed_rect(draw, tl, br, fill=f_col, outline=line_col, width=border_w)
+                else:
+                    draw.rounded_rectangle([tl, br], radius=8, fill=f_col, outline=line_col, width=border_w)
             elif geom_pts and len(geom_pts) >= 3:
                 # Polygon or custom shape (diamond, hexagon, cylinder, etc.)
                 draw.polygon(geom_pts, fill=f_col, outline=line_col)
             elif w > 0 and h > 0:
                 tl = to_img(pin_x - w/2.0, pin_y + h/2.0)
                 br = to_img(pin_x + w/2.0, pin_y - h/2.0)
-                draw.rounded_rectangle([tl, br], radius=6, fill=f_col, outline=line_col, width=border_w)
+                if line_pat in ('2', '3'):
+                    draw_dashed_rect(draw, tl, br, fill=f_col, outline=line_col, width=border_w)
+                else:
+                    draw.rounded_rectangle([tl, br], radius=6, fill=f_col, outline=line_col, width=border_w)
 
         # 3. Text Label
         text_elem = shape.find('{*}Text')
@@ -178,7 +262,15 @@ def render_vsdx_to_png(
                         char_col = c_cell.attrib.get('V')
 
                 chosen_font = font_sm if is_conn else (font_bold if is_container else font_main)
-                center_pt = to_img(pin_x, pin_y)
+                
+                try:
+                    txt_px = float(cells.get('TxtPinX', w * 0.5))
+                    txt_py = float(cells.get('TxtPinY', h * 0.5))
+                    txt_gx = pin_x - w / 2.0 + txt_px
+                    txt_gy = pin_y - h / 2.0 + txt_py
+                    center_pt = to_img(txt_gx, txt_gy)
+                except (ValueError, TypeError):
+                    center_pt = to_img(pin_x, pin_y)
 
                 lines = raw_text.split('\n')
                 line_widths = []

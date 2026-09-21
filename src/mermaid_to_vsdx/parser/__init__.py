@@ -8,7 +8,8 @@ from .ast_nodes import (
     Participant, Message, Note, SequenceDiagram,
     RelationshipType, ClassMember, ClassNode, ClassRelationship, ClassDiagram,
     StateNodeType, StateNode, StateTransition, StateDiagram,
-    ERAttribute, EREntity, ERRelationship, ERDiagram
+    ERAttribute, EREntity, ERRelationship, ERDiagram,
+    BlockNode, BlockEdge, BlockDiagram
 )
 from .base_parser import MermaidParseError, detect_diagram_type, extract_mermaid_from_markdown
 from .flowchart_parser import FlowchartParser
@@ -16,6 +17,7 @@ from .sequence_parser import SequenceParser
 from .class_parser import ClassParser
 from .state_parser import StateParser
 from .er_parser import ERParser
+from .block_parser import BlockParser
 
 
 def parse_mermaid(code: str):
@@ -35,9 +37,11 @@ def parse_mermaid(code: str):
         return dtype, StateParser().parse(clean_code)
     elif dtype == DiagramType.ER_DIAGRAM:
         return dtype, ERParser().parse(clean_code)
+    elif dtype == DiagramType.BLOCK:
+        return dtype, BlockParser().parse(clean_code)
     else:
         raise MermaidParseError(
-            "Could not detect supported diagram type. Start with 'graph TD', 'flowchart LR', 'sequenceDiagram', 'classDiagram', 'stateDiagram-v2', or 'erDiagram'."
+            "Could not detect supported diagram type. Start with 'graph TD', 'flowchart LR', 'sequenceDiagram', 'classDiagram', 'stateDiagram-v2', 'erDiagram', or 'block'."
         )
 
 

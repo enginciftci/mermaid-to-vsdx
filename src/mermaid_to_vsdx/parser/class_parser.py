@@ -13,10 +13,10 @@ from ..utils.unicode_helper import clean_label_text
 
 
 RELATIONSHIP_MAP = [
-    ("<|--", RelationshipType.INHERITANCE, False),
-    ("--|>", RelationshipType.INHERITANCE, True),
-    ("<|..", RelationshipType.REALIZATION, False),
-    ("..|>", RelationshipType.REALIZATION, True),
+    ("<|--", RelationshipType.INHERITANCE, True),
+    ("--|>", RelationshipType.INHERITANCE, False),
+    ("<|..", RelationshipType.REALIZATION, True),
+    ("..|>", RelationshipType.REALIZATION, False),
     ("*--", RelationshipType.COMPOSITION, False),
     ("--*", RelationshipType.COMPOSITION, True),
     ("o--", RelationshipType.AGGREGATION, False),
@@ -71,19 +71,41 @@ class ClassParser:
                 self._parse_class_member(line, self.current_class)
                 continue
 
-            # Check for class declaration with block: class Name {
-            m_block = re.match(r'^class\s+([A-Za-z0-9_\-ğüşıöçĞÜŞİÖÇ]+)(?:\[.*?\])?\s*\{$', line)
+            # Check direction: direction RL / LR / TB / BT
+            m_dir = re.match(r'^direction\s+(TB|TD|LR|RL|BT)$', line, re.IGNORECASE)
+            if m_dir:
+                d = m_dir.group(1).upper()
+                self.diagram.direction = "TD" if d == "TB" else d
+                continue
+
+            # Check for notes: note "text" or note for ClassName "text"
+            m_note = re.match(r'^note\s+(?:for\s+([A-Za-z0-9_\-ğüşıöçĞÜŞİÖÇ]+)\s+)?["\'](.*)["\']$', line, re.IGNORECASE)
+            if m_note:
+                target_cls = m_note.group(1)
+                note_text = clean_label_text(m_note.group(2))
+                from .ast_nodes import ClassNote
+                self.diagram.notes.append(ClassNote(text=note_text, target_class=target_cls))
+                continue
+
+            # Check for class declaration with block: class Name["Label"] {
+            m_block = re.match(r'^class\s+([A-Za-z0-9_\-ğüşıöçĞÜŞİÖÇ]+)(?:\[(.*?)\])?\s*\{$', line)
             if m_block:
                 c_name = m_block.group(1).strip()
+                c_lbl = m_block.group(2)
                 self.current_class = self._get_or_create_class(c_name)
+                if c_lbl:
+                    self.current_class.display_label = clean_label_text(c_lbl.strip('"\''))
                 in_class_block = True
                 continue
 
-            # Check for standalone class declaration: class Name
-            m_simple = re.match(r'^class\s+([A-Za-z0-9_\-ğüşıöçĞÜŞİÖÇ]+)(?:\[.*?\])?$', line)
+            # Check for standalone class declaration: class Name["Label"]
+            m_simple = re.match(r'^class\s+([A-Za-z0-9_\-ğüşıöçĞÜŞİÖÇ]+)(?:\[(.*?)\])?$', line)
             if m_simple:
                 c_name = m_simple.group(1).strip()
-                self._get_or_create_class(c_name)
+                c_lbl = m_simple.group(2)
+                cls_node = self._get_or_create_class(c_name)
+                if c_lbl:
+                    cls_node.display_label = clean_label_text(c_lbl.strip('"\''))
                 continue
 
             # Check for annotation line: <<interface>> ClassName or class ClassName:::style

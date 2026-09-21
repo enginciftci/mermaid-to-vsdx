@@ -11,6 +11,7 @@ from .layout_engine import SugiyamaLayoutEngine
 from .shapesheet import (
     build_2d_shape_xml,
     build_1d_connector_xml,
+    build_group_shape_xml,
     build_connect_records,
     calculate_connector_endpoints_and_ports,
 )
@@ -39,6 +40,11 @@ def compile_state_diagram_to_vsdx(
             node_dims[sid] = (0.34, 0.34, None)
         elif state.node_type == StateNodeType.CHOICE:
             node_dims[sid] = (0.6, 0.6, None)
+        elif state.node_type in (StateNodeType.FORK, StateNodeType.JOIN):
+            if diagram.direction in ("LR", "RL"):
+                node_dims[sid] = (0.08, 1.2, None)
+            else:
+                node_dims[sid] = (1.2, 0.08, None)
         else:
             full_text = f"{state.label}\n{state.description}" if state.description else state.label
             w, h, wrapped = estimate_text_dimensions(
@@ -89,18 +95,70 @@ def compile_state_diagram_to_vsdx(
                 line_weight_in=0.015,
             ))
         elif state.node_type == StateNodeType.TERMINAL:
+            # UML 2.5 final state bullseye: clean outer ring with white background
+            # enclosing a centered solid dark disc with clear separation.
+            w = l_node.width
+            h = l_node.height
+            outer_id = shape_id_counter
+            shape_id_counter += 1
+            inner_id = shape_id_counter
+            shape_id_counter += 1
+            inner_w = round(w * 0.55, 4)
+            inner_h = round(h * 0.55, 4)
+
+            child_shapes = [
+                build_2d_shape_xml(
+                    shape_id=outer_id,
+                    name=f"EndOuter_{s_id}",
+                    pin_x=round(w * 0.5, 4),
+                    pin_y=round(h * 0.5, 4),
+                    width=w,
+                    height=h,
+                    text="",
+                    shape_type="circle",
+                    fill_color="#ffffff",
+                    line_color=palette.default_text,
+                    line_weight_in=0.018,
+                    has_connections=False,
+                ),
+                build_2d_shape_xml(
+                    shape_id=inner_id,
+                    name=f"EndInner_{s_id}",
+                    pin_x=round(w * 0.5, 4),
+                    pin_y=round(h * 0.5, 4),
+                    width=inner_w,
+                    height=inner_h,
+                    text="",
+                    shape_type="circle",
+                    fill_color=palette.default_text,
+                    line_color=palette.default_text,
+                    line_weight_in=0.01,
+                    has_connections=False,
+                ),
+            ]
+            shapes_xml_list.append(build_group_shape_xml(
+                group_id=s_id,
+                name=f"End_{s_id}",
+                pin_x=l_node.pin_x,
+                pin_y=l_node.pin_y,
+                width=w,
+                height=h,
+                child_shapes_xml=child_shapes,
+                has_connections=True,
+            ))
+        elif state.node_type in (StateNodeType.FORK, StateNodeType.JOIN):
             shapes_xml_list.append(build_2d_shape_xml(
                 shape_id=s_id,
-                name=f"End_{s_id}",
+                name=f"Sync_{s_id}",
                 pin_x=l_node.pin_x,
                 pin_y=l_node.pin_y,
                 width=l_node.width,
                 height=l_node.height,
                 text="",
-                shape_type="double_circle",
+                shape_type="rectangle",
                 fill_color=palette.default_text,
                 line_color=palette.default_text,
-                line_weight_in=0.02,
+                line_weight_in=0.015,
             ))
         elif state.node_type == StateNodeType.CHOICE:
             shapes_xml_list.append(build_2d_shape_xml(
