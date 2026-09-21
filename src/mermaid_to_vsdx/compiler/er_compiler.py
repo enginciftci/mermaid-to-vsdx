@@ -11,6 +11,7 @@ from .layout_engine import SugiyamaLayoutEngine
 from .shapesheet import (
     build_2d_shape_xml,
     build_1d_connector_xml,
+    build_group_shape_xml,
     build_connect_records,
     calculate_connector_endpoints_and_ports,
 )
@@ -67,7 +68,7 @@ def compile_er_diagram_to_vsdx(
     shape_id_counter = 1
     entity_to_shape_id: Dict[str, int] = {}
 
-    # 4. Render 2D Entity Shapes (Multi-compartment)
+    # 4. Render 2D Entity Shapes (Multi-compartment wrapped in Group Shape)
     for ename, entity in diagram.entities.items():
         main_id = shape_id_counter
         shape_id_counter += 1
@@ -77,14 +78,18 @@ def compile_er_diagram_to_vsdx(
         cx, cy, w, h = l_node.pin_x, l_node.pin_y, l_node.width, l_node.height
 
         header_h = 0.4
-        attr_h = h - header_h
+        attr_h = round(h - header_h, 4)
 
-        # Base outer container box (has connection points)
-        shapes_xml_list.append(build_2d_shape_xml(
-            shape_id=main_id,
-            name=f"Entity_{ename}",
-            pin_x=cx,
-            pin_y=cy,
+        child_shapes: List[str] = []
+
+        # Child 1: Base outer container box (local coords)
+        bg_id = shape_id_counter
+        shape_id_counter += 1
+        child_shapes.append(build_2d_shape_xml(
+            shape_id=bg_id,
+            name=f"EntityBg_{ename}",
+            pin_x=round(w * 0.5, 4),
+            pin_y=round(h * 0.5, 4),
             width=w,
             height=h,
             text="",
@@ -93,15 +98,17 @@ def compile_er_diagram_to_vsdx(
             line_color=palette.default_border,
             line_weight_in=0.02,
             rounding_in=0.03,
-            has_connections=True,
+            has_connections=False,
         ))
 
-        # Title header compartment (top)
-        title_pin_y = cy + h / 2.0 - header_h / 2.0
-        shapes_xml_list.append(build_2d_shape_xml(
-            shape_id=shape_id_counter,
+        # Child 2: Title header compartment (top, local coords)
+        title_pin_y = round(h - header_h * 0.5, 4)
+        title_id = shape_id_counter
+        shape_id_counter += 1
+        child_shapes.append(build_2d_shape_xml(
+            shape_id=title_id,
             name=f"Header_{ename}",
-            pin_x=cx,
+            pin_x=round(w * 0.5, 4),
             pin_y=title_pin_y,
             width=w,
             height=header_h,
@@ -114,35 +121,21 @@ def compile_er_diagram_to_vsdx(
             font_size_pt=10.0,
             has_connections=False,
         ))
-        shape_id_counter += 1
 
-        # Divider line below header
-        div_y = cy + h / 2.0 - header_h
-        shapes_xml_list.append(build_1d_connector_xml(
-            connector_id=shape_id_counter,
-            begin_x=cx - w / 2.0,
-            begin_y=div_y,
-            end_x=cx + w / 2.0,
-            end_y=div_y,
-            line_color=palette.default_border,
-            line_weight_in=0.015,
-            end_arrow=0,
-            is_dynamic=False,
-        ))
-        shape_id_counter += 1
-
-        # Attributes compartment (bottom)
+        # Child 3: Attributes compartment (bottom, local coords, transparent)
         attr_lines = []
         for a in entity.attributes:
             key_tag = " PK" if a.is_pk else (" FK" if a.is_fk else "")
             attr_lines.append(f"{a.attr_type} {a.name}{key_tag}")
         attr_text = "\n".join(attr_lines) if attr_lines else " "
 
-        attr_pin_y = div_y - attr_h / 2.0
-        shapes_xml_list.append(build_2d_shape_xml(
-            shape_id=shape_id_counter,
+        attr_pin_y = round(attr_h * 0.5, 4)
+        attr_id = shape_id_counter
+        shape_id_counter += 1
+        child_shapes.append(build_2d_shape_xml(
+            shape_id=attr_id,
             name=f"Attrs_{ename}",
-            pin_x=cx,
+            pin_x=round(w * 0.5, 4),
             pin_y=attr_pin_y,
             width=w,
             height=attr_h,
@@ -151,12 +144,41 @@ def compile_er_diagram_to_vsdx(
             fill_color=palette.default_fill,
             line_color=palette.default_fill,
             text_color=palette.default_text,
+            fill_pattern=0,
+            line_pattern=0,
             font_name=font_name,
             font_size_pt=9.0,
             align_left=True,
             has_connections=False,
         ))
+
+        # Child 4: Divider line below header (drawn on top)
+        div_y = round(h - header_h, 4)
+        div_id = shape_id_counter
         shape_id_counter += 1
+        child_shapes.append(build_1d_connector_xml(
+            connector_id=div_id,
+            begin_x=0.0,
+            begin_y=div_y,
+            end_x=w,
+            end_y=div_y,
+            line_color=palette.default_border,
+            line_weight_in=0.015,
+            end_arrow=0,
+            is_dynamic=False,
+        ))
+
+        # Enclosing Group Shape
+        shapes_xml_list.append(build_group_shape_xml(
+            group_id=main_id,
+            name=f"Entity_{ename}",
+            pin_x=cx,
+            pin_y=cy,
+            width=w,
+            height=h,
+            child_shapes_xml=child_shapes,
+            has_connections=True,
+        ))
 
     # 5. Render 1D Relationships & <Connects>
     for rel in diagram.relationships:
@@ -208,6 +230,7 @@ def compile_er_diagram_to_vsdx(
             src_port=src_port,
             dst_port=dst_port,
             routing_direction="TD",
+            intermediate_waypoints=layout_res.edge_routes.get((rel.entity1, rel.entity2), []),
         )
         shapes_xml_list.append(conn_xml)
 

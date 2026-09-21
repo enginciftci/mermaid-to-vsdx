@@ -19,6 +19,7 @@ wheels/
 # Runtime generation outputs & temporary test artifacts
 output/
 verification_output/
+tests/output/
 scratch/
 
 # Operating System & IDE metadata

@@ -4,7 +4,7 @@ Transforms SequenceDiagram AST into Open Packaging Conventions Visio XML.
 """
 
 from typing import Dict, List, Tuple
-from ..parser.ast_nodes import SequenceDiagram, Participant, Message, Note, MessageArrow
+from ..parser.ast_nodes import SequenceDiagram, Participant, Message, Note, MessageArrow, Activation
 from ..visio.palettes import PALETTES, DEFAULT_PALETTE_NAME, is_dark_color
 from .text_metrics import estimate_text_dimensions
 from .shapesheet import (
@@ -33,7 +33,8 @@ def compile_sequence_to_vsdx(
     part_w = 1.6
     part_h = 0.6
 
-    total_events = len(diagram.items)
+    visual_items = [item for item in diagram.items if isinstance(item, (Message, Note))]
+    total_events = len(visual_items)
     content_w = start_x + (num_p - 1) * part_spacing + part_w / 2.0 + 1.0
     content_h = margin_top + (total_events + 2) * step_y + part_h + 1.0
 
@@ -96,7 +97,64 @@ def compile_sequence_to_vsdx(
             is_dynamic=False,
         ))
 
-    # 2. Render Participant Boxes (Top and Bottom)
+    # Pre-calculate item positions and activation intervals (Item 7)
+    open_activations: Dict[str, List[float]] = {p.id: [] for p in participants}
+    active_intervals: Dict[str, List[Tuple[float, float]]] = {p.id: [] for p in participants}
+    curr_calc_y = top_y - step_y
+    item_y_map: Dict[int, float] = {}
+
+    for idx, item in enumerate(diagram.items):
+        if isinstance(item, (Message, Note)):
+            item_y_map[idx] = curr_calc_y
+            if isinstance(item, Message):
+                if item.activate:
+                    open_activations[item.receiver_id].append(curr_calc_y)
+                if item.deactivate:
+                    target_p = item.sender_id if open_activations.get(item.sender_id) else item.receiver_id
+                    if open_activations.get(target_p):
+                        start_y = open_activations[target_p].pop()
+                        active_intervals[target_p].append((start_y, curr_calc_y))
+            curr_calc_y -= step_y
+        elif isinstance(item, Activation):
+            act_y = curr_calc_y + step_y if item_y_map else curr_calc_y
+            if item.is_activate:
+                open_activations[item.participant_id].append(act_y)
+            else:
+                if open_activations.get(item.participant_id):
+                    start_y = open_activations[item.participant_id].pop()
+                    active_intervals[item.participant_id].append((start_y, act_y))
+
+    # Close any unclosed activations
+    for p_id, starts in open_activations.items():
+        for start_y in starts:
+            active_intervals[p_id].append((start_y, bottom_y + part_h / 2.0 + 0.1))
+
+    # 2. Render Activation Bars (emitted after lifelines, before participant headers / messages)
+    for p_obj in participants:
+        px = part_x[p_obj.id]
+        intervals = active_intervals.get(p_obj.id, [])
+        for act_idx, (start_y, end_y) in enumerate(intervals):
+            act_bar_id = shape_id_counter
+            shape_id_counter += 1
+            bar_w = 0.16
+            bar_h = max(0.2, abs(start_y - end_y))
+            bar_y = (start_y + end_y) / 2.0
+            shapes_xml_list.append(build_2d_shape_xml(
+                shape_id=act_bar_id,
+                name=f"Activation_{p_obj.id}_{act_idx}",
+                pin_x=px,
+                pin_y=round(bar_y, 4),
+                width=bar_w,
+                height=round(bar_h, 4),
+                text="",
+                shape_type="rectangle",
+                fill_color=palette.decision_fill,
+                line_color=palette.default_border,
+                line_weight_in=0.015,
+                has_connections=False,
+            ))
+
+    # 3. Render Participant Boxes (Top and Bottom)
     for p_obj in participants:
         px = part_x[p_obj.id]
 
@@ -142,9 +200,13 @@ def compile_sequence_to_vsdx(
             font_size_pt=10.0,
         ))
 
-    # 3. Render Items (Messages and Notes) in order
-    curr_y = top_y - step_y
+    # 4. Render Items (Messages and Notes) in order
     for item_idx, item in enumerate(diagram.items):
+        if isinstance(item, Activation):
+            continue
+
+        curr_y = item_y_map[item_idx]
+
         if isinstance(item, Note):
             n_id = shape_id_counter
             shape_id_counter += 1
@@ -182,7 +244,6 @@ def compile_sequence_to_vsdx(
                 font_name=font_name,
                 font_size_pt=9.0,
             ))
-            curr_y -= step_y
 
         elif isinstance(item, Message):
             m_id = shape_id_counter
@@ -219,9 +280,8 @@ def compile_sequence_to_vsdx(
                 text_color=palette.connector_text,
                 is_dynamic=False,
             ))
-            curr_y -= step_y
 
-    # 4. Serialize to vsdx
+    # 5. Serialize to vsdx
     return package_vsdx(
         output_path=output_path,
         shapes_xml="\n".join(shapes_xml_list),

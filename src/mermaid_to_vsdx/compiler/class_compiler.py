@@ -11,6 +11,7 @@ from .layout_engine import SugiyamaLayoutEngine
 from .shapesheet import (
     build_2d_shape_xml,
     build_1d_connector_xml,
+    build_group_shape_xml,
     build_connect_records,
     calculate_connector_endpoints,
     calculate_connector_endpoints_and_ports,
@@ -74,7 +75,7 @@ def compile_class_diagram_to_vsdx(
     shape_id_counter = 1
     class_to_shape_id: Dict[str, int] = {}
 
-    # 4. Render Classes (Multi-compartment)
+    # 4. Render Classes (Multi-compartment wrapped in Group Shape)
     for cid, cls in diagram.classes.items():
         main_id = shape_id_counter
         shape_id_counter += 1
@@ -92,12 +93,16 @@ def compile_class_diagram_to_vsdx(
         border_col = palette.decision_border if is_interface else palette.default_border
         text_col = "#ffffff" if is_dark_color(fill_col) else palette.default_text
 
-        # Base class box
-        shapes_xml_list.append(build_2d_shape_xml(
-            shape_id=main_id,
-            name=f"Class_{cid}",
-            pin_x=cx,
-            pin_y=cy,
+        child_shapes: List[str] = []
+
+        # Child 1: Base class box (local coords within group)
+        bg_id = shape_id_counter
+        shape_id_counter += 1
+        child_shapes.append(build_2d_shape_xml(
+            shape_id=bg_id,
+            name=f"ClassBg_{cid}",
+            pin_x=round(w * 0.5, 4),
+            pin_y=round(h * 0.5, 4),
             width=w,
             height=h,
             text="",
@@ -106,18 +111,21 @@ def compile_class_diagram_to_vsdx(
             line_color=border_col,
             line_weight_in=0.0208,
             rounding_in=0.04,
+            has_connections=False,
         ))
 
-        # Title compartment at top
+        # Child 2: Title compartment at top (transparent text box)
         title_lines = [f"<<{cls.annotation}>>", cls.name] if cls.annotation else [cls.name]
         title_text = "\n".join(title_lines)
         title_h = 0.55 if cls.annotation else 0.4
-        title_pin_y = cy + h / 2.0 - title_h / 2.0
+        title_pin_y = round(h - title_h * 0.5, 4)
 
-        shapes_xml_list.append(build_2d_shape_xml(
-            shape_id=shape_id_counter,
+        title_id = shape_id_counter
+        shape_id_counter += 1
+        child_shapes.append(build_2d_shape_xml(
+            shape_id=title_id,
             name=f"Title_{cid}",
-            pin_x=cx,
+            pin_x=round(w * 0.5, 4),
             pin_y=title_pin_y,
             width=w,
             height=title_h,
@@ -126,40 +134,29 @@ def compile_class_diagram_to_vsdx(
             fill_color=fill_col,
             line_color=fill_col,
             text_color=text_col,
+            fill_pattern=0,
+            line_pattern=0,
             font_name=font_name,
             font_size_pt=10.0,
             has_connections=False,
         ))
-        shape_id_counter += 1
 
-        # Divider 1 (below title)
-        div1_y = cy + h / 2.0 - title_h
-        shapes_xml_list.append(build_1d_connector_xml(
-            connector_id=shape_id_counter,
-            begin_x=cx - w / 2.0,
-            begin_y=div1_y,
-            end_x=cx + w / 2.0,
-            end_y=div1_y,
-            line_color=border_col,
-            line_weight_in=0.015,
-            end_arrow=0,
-            is_dynamic=False,
-        ))
-        shape_id_counter += 1
-
-        # Attributes compartment
+        # Child 3: Attributes compartment (transparent text box)
         attr_lines = []
         for a in attrs:
             pfx = a.visibility if a.visibility else "+"
             attr_lines.append(f"{pfx} {a.return_type} {a.name}" if a.return_type else f"{pfx} {a.name}")
         attr_text = "\n".join(attr_lines) if attr_lines else " "
         attr_h = max(0.3, len(attrs) * 0.22 + 0.1)
-        attr_pin_y = div1_y - attr_h / 2.0
+        meth_h = max(0.3, len(meths) * 0.22 + 0.1)
+        attr_pin_y = round(meth_h + attr_h * 0.5, 4)
 
-        shapes_xml_list.append(build_2d_shape_xml(
-            shape_id=shape_id_counter,
+        attr_id = shape_id_counter
+        shape_id_counter += 1
+        child_shapes.append(build_2d_shape_xml(
+            shape_id=attr_id,
             name=f"Attrs_{cid}",
-            pin_x=cx,
+            pin_x=round(w * 0.5, 4),
             pin_y=attr_pin_y,
             width=w,
             height=attr_h,
@@ -168,42 +165,29 @@ def compile_class_diagram_to_vsdx(
             fill_color=fill_col,
             line_color=fill_col,
             text_color=text_col,
+            fill_pattern=0,
+            line_pattern=0,
             font_name=font_name,
             font_size_pt=9.0,
             align_left=True,
             has_connections=False,
         ))
-        shape_id_counter += 1
 
-        # Divider 2 (below attributes)
-        div2_y = div1_y - attr_h
-        shapes_xml_list.append(build_1d_connector_xml(
-            connector_id=shape_id_counter,
-            begin_x=cx - w / 2.0,
-            begin_y=div2_y,
-            end_x=cx + w / 2.0,
-            end_y=div2_y,
-            line_color=border_col,
-            line_weight_in=0.015,
-            end_arrow=0,
-            is_dynamic=False,
-        ))
-        shape_id_counter += 1
-
-        # Methods compartment
+        # Child 4: Methods compartment (transparent text box)
         meth_lines = []
         for m in meths:
             pfx = m.visibility if m.visibility else "+"
             sig = f"{m.name}({m.parameters})" if m.parameters else f"{m.name}()"
             meth_lines.append(f"{pfx} {sig}: {m.return_type}" if m.return_type else f"{pfx} {sig}")
         meth_text = "\n".join(meth_lines) if meth_lines else " "
-        meth_h = max(0.3, len(meths) * 0.22 + 0.1)
-        meth_pin_y = div2_y - meth_h / 2.0
+        meth_pin_y = round(meth_h * 0.5, 4)
 
-        shapes_xml_list.append(build_2d_shape_xml(
-            shape_id=shape_id_counter,
+        meth_id = shape_id_counter
+        shape_id_counter += 1
+        child_shapes.append(build_2d_shape_xml(
+            shape_id=meth_id,
             name=f"Methods_{cid}",
-            pin_x=cx,
+            pin_x=round(w * 0.5, 4),
             pin_y=meth_pin_y,
             width=w,
             height=meth_h,
@@ -212,12 +196,57 @@ def compile_class_diagram_to_vsdx(
             fill_color=fill_col,
             line_color=fill_col,
             text_color=text_col,
+            fill_pattern=0,
+            line_pattern=0,
             font_name=font_name,
             font_size_pt=9.0,
             align_left=True,
             has_connections=False,
         ))
+
+        # Child 5: Divider 1 (below title, drawn on top)
+        div1_y = round(h - title_h, 4)
+        div1_id = shape_id_counter
         shape_id_counter += 1
+        child_shapes.append(build_1d_connector_xml(
+            connector_id=div1_id,
+            begin_x=0.0,
+            begin_y=div1_y,
+            end_x=w,
+            end_y=div1_y,
+            line_color=border_col,
+            line_weight_in=0.015,
+            end_arrow=0,
+            is_dynamic=False,
+        ))
+
+        # Child 6: Divider 2 (below attributes, drawn on top)
+        div2_y = round(meth_h, 4)
+        div2_id = shape_id_counter
+        shape_id_counter += 1
+        child_shapes.append(build_1d_connector_xml(
+            connector_id=div2_id,
+            begin_x=0.0,
+            begin_y=div2_y,
+            end_x=w,
+            end_y=div2_y,
+            line_color=border_col,
+            line_weight_in=0.015,
+            end_arrow=0,
+            is_dynamic=False,
+        ))
+
+        # Enclosing Group Shape
+        shapes_xml_list.append(build_group_shape_xml(
+            group_id=main_id,
+            name=f"Class_{cid}",
+            pin_x=cx,
+            pin_y=cy,
+            width=w,
+            height=h,
+            child_shapes_xml=child_shapes,
+            has_connections=True,
+        ))
 
     # 5. Render UML Relationship Connectors
     for rel in diagram.relationships:
@@ -299,6 +328,7 @@ def compile_class_diagram_to_vsdx(
             src_port=src_port,
             dst_port=dst_port,
             routing_direction="TD",
+            intermediate_waypoints=layout_res.edge_routes.get((rel.source_name, rel.target_name), []),
         ))
 
         connects_xml_list.append(build_connect_records(

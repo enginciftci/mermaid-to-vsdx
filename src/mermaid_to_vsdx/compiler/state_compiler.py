@@ -41,13 +41,14 @@ def compile_state_diagram_to_vsdx(
             node_dims[sid] = (0.6, 0.6, None)
         else:
             full_text = f"{state.label}\n{state.description}" if state.description else state.label
-            w, h, _ = estimate_text_dimensions(
+            w, h, wrapped = estimate_text_dimensions(
                 text=full_text,
                 font_size_pt=9.5,
                 min_width_in=1.6,
                 min_height_in=0.75,
+                max_width_in=3.0,
             )
-            node_dims[sid] = (w, h, None)
+            node_dims[sid] = (w, h, "\n".join(wrapped) if isinstance(wrapped, list) else str(wrapped))
 
     # 2. Extract edge pairs
     edge_pairs = [(t.source_id, t.target_id) for t in diagram.transitions]
@@ -97,7 +98,7 @@ def compile_state_diagram_to_vsdx(
                 height=l_node.height,
                 text="",
                 shape_type="double_circle",
-                fill_color="#ffffff",
+                fill_color=palette.default_text,
                 line_color=palette.default_text,
                 line_weight_in=0.02,
             ))
@@ -116,7 +117,7 @@ def compile_state_diagram_to_vsdx(
                 line_weight_in=0.018,
             ))
         else:
-            full_text = f"{state.label}\n{state.description}" if state.description else state.label
+            state_text = node_dims[sid][2] if sid in node_dims and node_dims[sid][2] else (f"{state.label}\n{state.description}" if state.description else state.label)
             shapes_xml_list.append(build_2d_shape_xml(
                 shape_id=s_id,
                 name=f"State_{sid}",
@@ -124,7 +125,7 @@ def compile_state_diagram_to_vsdx(
                 pin_y=l_node.pin_y,
                 width=l_node.width,
                 height=l_node.height,
-                text=full_text,
+                text=state_text,
                 shape_type="rounded",
                 rounding_in=0.15,
                 fill_color=palette.default_fill,
@@ -182,6 +183,7 @@ def compile_state_diagram_to_vsdx(
             src_port=src_port,
             dst_port=dst_port,
             routing_direction=diagram.direction,
+            intermediate_waypoints=layout_res.edge_routes.get((trans.source_id, trans.target_id), []),
         )
         shapes_xml_list.append(conn_xml)
 

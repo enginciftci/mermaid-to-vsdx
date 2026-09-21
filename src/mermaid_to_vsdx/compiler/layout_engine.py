@@ -16,6 +16,7 @@ class LayoutNode:
     subgraph_id: Optional[str] = None
     rank: int = 0
     order: int = 0
+    is_dummy: bool = False
     # Screen coordinates (origin top-left, inches)
     screen_x: float = 0.0
     screen_y: float = 0.0
@@ -47,6 +48,7 @@ class LayoutResult:
     subgraphs: Dict[str, LayoutSubgraph]
     page_width: float
     page_height: float
+    edge_routes: Dict[Tuple[str, str], List[Tuple[float, float]]] = field(default_factory=dict)
 
 
 class SugiyamaLayoutEngine:
@@ -98,13 +100,68 @@ class SugiyamaLayoutEngine:
         # 2. Rank assignment (Longest Path)
         self._assign_ranks(layout_nodes, acyclic_edges)
 
-        # Group nodes by rank
+        # 2b. Insert dummy nodes for skip-level edges spanning > 1 rank
+        dummy_edges: Dict[Tuple[str, str], List[str]] = {}
+        augmented_adj: Dict[str, List[str]] = defaultdict(list)
+        augmented_rev_adj: Dict[str, List[str]] = defaultdict(list)
+
+        for src, dst in valid_edges:
+            src_node = layout_nodes[src]
+            dst_node = layout_nodes[dst]
+            diff = dst_node.rank - src_node.rank
+            if diff > 1:
+                dummies = []
+                prev = src
+                for r in range(src_node.rank + 1, dst_node.rank):
+                    d_id = f"__dummy_{src}_{dst}_{r}__"
+                    d_node = LayoutNode(
+                        id=d_id,
+                        width=0.2,
+                        height=0.2,
+                        subgraph_id=src_node.subgraph_id if src_node.subgraph_id == dst_node.subgraph_id else None,
+                        rank=r,
+                        is_dummy=True,
+                    )
+                    layout_nodes[d_id] = d_node
+                    dummies.append(d_id)
+                    augmented_adj[prev].append(d_id)
+                    augmented_rev_adj[d_id].append(prev)
+                    prev = d_id
+                augmented_adj[prev].append(dst)
+                augmented_rev_adj[dst].append(prev)
+                dummy_edges[(src, dst)] = dummies
+            elif diff < -1:
+                dummies = []
+                prev = src
+                for r in range(src_node.rank - 1, dst_node.rank, -1):
+                    d_id = f"__dummy_{src}_{dst}_{r}__"
+                    d_node = LayoutNode(
+                        id=d_id,
+                        width=0.2,
+                        height=0.2,
+                        subgraph_id=src_node.subgraph_id if src_node.subgraph_id == dst_node.subgraph_id else None,
+                        rank=r,
+                        is_dummy=True,
+                    )
+                    layout_nodes[d_id] = d_node
+                    dummies.append(d_id)
+                    augmented_adj[prev].append(d_id)
+                    augmented_rev_adj[d_id].append(prev)
+                    prev = d_id
+                augmented_adj[prev].append(dst)
+                augmented_rev_adj[dst].append(prev)
+                dummy_edges[(src, dst)] = dummies
+            else:
+                augmented_adj[src].append(dst)
+                augmented_rev_adj[dst].append(src)
+
+        # Group nodes by rank (including dummy nodes)
         ranks: Dict[int, List[str]] = defaultdict(list)
         for nid, node in layout_nodes.items():
             ranks[node.rank].append(nid)
 
         # 3. Crossing reduction: sort within rank by barycenter and subgraph affinity (multi-pass sweeps)
-        self._order_vertices(ranks, layout_nodes, adj, rev_adj)
+        self._order_vertices(ranks, layout_nodes, augmented_adj, augmented_rev_adj)
 
         # 4. Coordinate assignment in screen space
         is_horizontal = self.direction in ("LR", "RL")
@@ -170,13 +227,13 @@ class SugiyamaLayoutEngine:
                 for n in r_nodes:
                     layout_nodes[n].screen_x += offset_x
 
-        # 6. Subgraphs bounding box synthesis
+        # 6. Subgraphs bounding box synthesis with header headroom
         layout_subgraphs: Dict[str, LayoutSubgraph] = {}
         if subgraphs:
-            pad = 0.45
-            header_h = 0.4
+            pad = 0.5
+            header_h = 0.45
             for sub_id, (sub_title, sub_nids) in subgraphs.items():
-                member_nodes = [layout_nodes[n] for n in sub_nids if n in layout_nodes]
+                member_nodes = [layout_nodes[n] for n in sub_nids if n in layout_nodes and not layout_nodes[n].is_dummy]
                 if not member_nodes:
                     continue
                 s_min_x = min(n.screen_x - n.width / 2.0 for n in member_nodes) - pad
@@ -189,7 +246,7 @@ class SugiyamaLayoutEngine:
                 layout_subgraphs[sub_id] = LayoutSubgraph(
                     id=sub_id,
                     title=sub_title,
-                    node_ids=sub_nids,
+                    node_ids=[n for n in sub_nids if n in layout_nodes and not layout_nodes[n].is_dummy],
                     min_x=s_min_x,
                     max_x=s_max_x,
                     min_y=s_min_y,
@@ -225,27 +282,45 @@ class SugiyamaLayoutEngine:
         total_w = all_max_x - all_min_x
         total_h = all_max_y - all_min_y
 
-        page_w = max(8.5, round(total_w + self.page_margin * 2, 2))
-        page_h = max(11.0, round(total_h + self.page_margin * 2, 2))
+        # Adapt page orientation: landscape for LR/RL or wide diagrams
+        if is_horizontal or total_w > total_h:
+            min_page_w, min_page_h = 11.0, 8.5
+        else:
+            min_page_w, min_page_h = 8.5, 11.0
+
+        page_w = max(min_page_w, round(total_w + self.page_margin * 2, 2))
+        page_h = max(min_page_h, round(total_h + self.page_margin * 2, 2))
+
+        # Center diagram content within page margins
+        extra_x = max(0.0, round((page_w - (total_w + self.page_margin * 2)) / 2.0, 3))
+        extra_y = max(0.0, round((page_h - (total_h + self.page_margin * 2)) / 2.0, 3))
 
         # 7. Cartesian coordinate inversion:
         # Visio (0,0) is bottom-left, Y points UP
-        # PinY = page_h - (screen_y + page_margin)
         for n in layout_nodes.values():
-            n.pin_x = round(n.screen_x + self.page_margin, 3)
-            n.pin_y = round(page_h - (n.screen_y + self.page_margin), 3)
+            n.pin_x = round(n.screen_x + self.page_margin + extra_x, 3)
+            n.pin_y = round(page_h - (n.screen_y + self.page_margin + extra_y), 3)
 
         for s in layout_subgraphs.values():
             center_x = (s.min_x + s.max_x) / 2.0
             center_y = (s.min_y + s.max_y) / 2.0
-            s.pin_x = round(center_x + self.page_margin, 3)
-            s.pin_y = round(page_h - (center_y + self.page_margin), 3)
+            s.pin_x = round(center_x + self.page_margin + extra_x, 3)
+            s.pin_y = round(page_h - (center_y + self.page_margin + extra_y), 3)
+
+        # Collect edge routes for dummy waypoints
+        edge_routes: Dict[Tuple[str, str], List[Tuple[float, float]]] = {}
+        for (src, dst), dummies in dummy_edges.items():
+            if dummies:
+                edge_routes[(src, dst)] = [(layout_nodes[d].pin_x, layout_nodes[d].pin_y) for d in dummies]
+
+        real_nodes = {nid: n for nid, n in layout_nodes.items() if not n.is_dummy}
 
         return LayoutResult(
-            nodes=layout_nodes,
+            nodes=real_nodes,
             subgraphs=layout_subgraphs,
             page_width=page_w,
             page_height=page_h,
+            edge_routes=edge_routes,
         )
 
     def _remove_cycles(self, node_ids: List[str], adj: Dict[str, List[str]]) -> List[Tuple[str, str]]:

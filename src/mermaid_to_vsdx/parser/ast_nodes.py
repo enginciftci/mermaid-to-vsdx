@@ -114,10 +114,16 @@ class Note:
 
 
 @dataclass
+class Activation:
+    participant_id: str
+    is_activate: bool = True
+
+
+@dataclass
 class SequenceDiagram:
     title: str = ""
     participants: List[Participant] = field(default_factory=list)
-    items: List[Union[Message, Note]] = field(default_factory=list)
+    items: List[Union[Message, Note, Activation]] = field(default_factory=list)
 
 
 # --- Class Diagram Models ---

@@ -6,7 +6,7 @@ Parses sequence diagrams into SequenceDiagram AST models.
 import re
 from typing import List, Optional
 from .ast_nodes import (
-    SequenceDiagram, Participant, Message, Note, MessageArrow
+    SequenceDiagram, Participant, Message, Note, MessageArrow, Activation
 )
 from .base_parser import MermaidParseError, preprocess_lines
 from ..utils.unicode_helper import clean_label_text, ensure_utf8
@@ -32,20 +32,15 @@ class SequenceParser:
         self.diagram = SequenceDiagram()
         self.participant_order: List[str] = []
 
-    def parse(self, code: str) -> SequenceDiagram:
-        self.diagram = SequenceDiagram()
-        self.participant_order = []
-
-        raw_lines = preprocess_lines(code)
+    def parse(self, text: str) -> SequenceDiagram:
+        text = ensure_utf8(text)
+        raw_lines = preprocess_lines(text)
         if not raw_lines:
-            raise MermaidParseError("Empty Mermaid diagram source code.")
+            raise MermaidParseError("Empty sequence diagram input", 1, "")
 
-        header_idx, header_line = raw_lines[0]
-        if not header_line.lower().startswith("sequencediagram"):
-            raise MermaidParseError(
-                f"Invalid sequence diagram header '{header_line}'. Expected 'sequenceDiagram'.",
-                header_idx, header_line
-            )
+        first_line_num, first_line = raw_lines[0]
+        if not re.match(r'^sequenceDiagram\b', first_line, re.IGNORECASE):
+            raise MermaidParseError(f"Expected 'sequenceDiagram' header, got '{first_line}'", first_line_num, first_line)
 
         for line_num, line in raw_lines[1:]:
             self._parse_line(line, line_num)
@@ -75,6 +70,18 @@ class SequenceParser:
             label_raw = m_part.group(4)
             label = clean_label_text(label_raw) if label_raw else part_id
             self._add_participant(part_id, label, is_actor)
+            return
+
+        # Check activate / deactivate standalone
+        m_act = re.match(r'^(activate|deactivate)\s+([A-Za-z0-9_\-ğüşıöçĞÜŞİÖÇ]+)$', line, re.IGNORECASE)
+        if m_act:
+            action = m_act.group(1).lower()
+            part_id = m_act.group(2)
+            self._ensure_participant_exists(part_id)
+            self.diagram.items.append(Activation(
+                participant_id=part_id,
+                is_activate=(action == "activate")
+            ))
             return
 
         # Check Note

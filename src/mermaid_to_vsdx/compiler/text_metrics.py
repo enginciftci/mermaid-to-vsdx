@@ -3,7 +3,7 @@ Headless typographical sizing heuristics.
 Estimates bounding box dimensions for text elements without browser DOM or native font engines.
 """
 
-from typing import Tuple, List
+from typing import Tuple, List, Optional
 
 # Character width weights (in points at 10pt base font)
 CHAR_WIDTH_WEIGHTS = {
@@ -44,6 +44,46 @@ def estimate_line_width_pt(line: str, font_size_pt: float = 10.0, bold: bool = F
     return total_pt
 
 
+def wrap_text_to_width(
+    text: str,
+    max_line_width_pt: Optional[float] = None,
+    font_size_pt: float = 10.0,
+    bold: bool = False,
+    max_width_in: Optional[float] = None,
+) -> List[str]:
+    """
+    Greedily wraps text on word boundaries so that lines do not exceed max_line_width_pt.
+    If a single word exceeds max_line_width_pt, it remains intact on its own line.
+    """
+    if max_width_in is not None and max_width_in > 0:
+        max_line_width_pt = max_width_in * 72.0
+    elif max_line_width_pt is None or max_line_width_pt <= 0:
+        max_line_width_pt = 3.2 * 72.0
+
+    words = text.split(" ")
+    if not words:
+        return [""]
+
+    wrapped_lines: List[str] = []
+    current_line: List[str] = []
+
+    for word in words:
+        if not word:
+            continue
+        test_line = " ".join(current_line + [word])
+        w_pt = estimate_line_width_pt(test_line, font_size_pt, bold)
+        if w_pt <= max_line_width_pt or not current_line:
+            current_line.append(word)
+        else:
+            wrapped_lines.append(" ".join(current_line))
+            current_line = [word]
+
+    if current_line:
+        wrapped_lines.append(" ".join(current_line))
+
+    return wrapped_lines if wrapped_lines else [text]
+
+
 def estimate_text_dimensions(
     text: str,
     font_size_pt: float = 10.0,
@@ -51,15 +91,28 @@ def estimate_text_dimensions(
     padding_y_in: float = 0.25,
     min_width_in: float = 1.6,
     min_height_in: float = 0.75,
+    max_width_in: Optional[float] = 3.2,
 ) -> Tuple[float, float, List[str]]:
     """
     Estimates physical bounding box dimensions (in inches) for a given text block.
-    Supports newline and '<br>' line breaks.
+    Supports newline and '<br>' line breaks, and greedily wraps long single-line labels
+    when max_width_in is provided.
     """
     normalized_text = text.replace("<br/>", "\n").replace("<br>", "\n").replace("\\n", "\n")
-    lines = [line.strip() for line in normalized_text.split("\n")]
-    if not lines or (len(lines) == 1 and not lines[0]):
-        lines = [" "]
+    raw_lines = [line.strip() for line in normalized_text.split("\n")]
+    if not raw_lines or (len(raw_lines) == 1 and not raw_lines[0]):
+        raw_lines = [" "]
+
+    lines: List[str] = []
+    if max_width_in and max_width_in > 0:
+        usable_width_pt = max(36.0, (max_width_in - padding_x_in * 2) * 72.0)
+        for raw_line in raw_lines:
+            if estimate_line_width_pt(raw_line, font_size_pt) > usable_width_pt:
+                lines.extend(wrap_text_to_width(raw_line, usable_width_pt, font_size_pt))
+            else:
+                lines.append(raw_line)
+    else:
+        lines = raw_lines
 
     max_line_width_pt = max(estimate_line_width_pt(l, font_size_pt) for l in lines)
     # 72 points = 1 inch
