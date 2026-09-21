@@ -71,18 +71,48 @@ def is_visio_installed() -> bool:
 
 def get_visio_version() -> str:
     """
-    Returns the version string of the installed Microsoft Visio instance.
-    Uses VisioSession to ensure reliable Click-to-Run bootstrapping.
+    Returns the version string of the installed Microsoft Visio instance passively,
+    without launching the VISIO.EXE process or initializing COM.
     """
+    # 1. Try reading PE file version info from VISIO.EXE directly (zero process spawn)
+    visio_exe = find_visio_executable()
+    if visio_exe and os.path.exists(visio_exe):
+        try:
+            import win32api
+            info = win32api.GetFileVersionInfo(visio_exe, "\\")
+            ms = info["FileVersionMS"]
+            ls = info["FileVersionLS"]
+            major = win32api.HIWORD(ms)
+            minor = win32api.LOWORD(ms)
+            build = win32api.HIWORD(ls)
+            revision = win32api.LOWORD(ls)
+            return f"{major}.{minor} (Build {build}.{revision})"
+        except Exception:
+            pass
+
+    # 2. Try registry ProgID CurVer (e.g. Visio.Application.16 -> 16.0)
     try:
-        with VisioSession(visible=False) as app:
-            return str(app.Version)
-    except Exception as e:
-        # If COM fails, check binary file version or fallback to 16.0
-        visio_exe = find_visio_executable()
-        if visio_exe and "Office16" in visio_exe:
-            return "16.0 (Office 16 / Microsoft 365)"
-        return f"Algılandı ({e})"
+        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, r"Visio.Application\CurVer") as key:
+            curver = winreg.QueryValue(key, "")
+            parts = curver.split(".")
+            if len(parts) >= 3 and parts[-1].isdigit():
+                return f"{parts[-1]}.0"
+    except OSError:
+        pass
+
+    # 3. Try Click-to-Run registry version
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Office\ClickToRun\Configuration") as key:
+            ver, _ = winreg.QueryValueEx(key, "VersionToReport")
+            if ver:
+                return str(ver)
+    except OSError:
+        pass
+
+    if visio_exe and "Office16" in visio_exe:
+        return "16.0 (Office 16 / Microsoft 365)"
+
+    return "16.0"
 
 
 def open_in_visio(vsdx_path: str):
