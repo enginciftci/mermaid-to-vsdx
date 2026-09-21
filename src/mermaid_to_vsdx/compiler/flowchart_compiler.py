@@ -5,7 +5,7 @@ Transforms FlowchartDiagram AST into Open Packaging Conventions Visio XML.
 
 from collections import defaultdict
 from typing import Dict, List, Tuple
-from ..parser.ast_nodes import FlowchartDiagram, ShapeType, EdgeStyle, ArrowType
+from ..parser.ast_nodes import FlowchartDiagram, ShapeType, EdgeStyle, ArrowType, Subgraph
 from ..visio.palettes import PALETTES, DEFAULT_PALETTE_NAME, is_dark_color
 from .text_metrics import estimate_text_dimensions
 from .layout_engine import SugiyamaLayoutEngine
@@ -35,6 +35,35 @@ SHAPE_MAP = {
 }
 
 
+def _get_all_subgraphs_dict(subgraphs: List[Subgraph]) -> Dict[str, Subgraph]:
+    result = {}
+    for s in subgraphs:
+        result[s.id] = s
+        result.update(_get_all_subgraphs_dict(s.children))
+    return result
+
+
+def _get_subgraph_all_nodes(sub: Subgraph) -> List[str]:
+    nodes = list(sub.node_ids)
+    for c in sub.children:
+        nodes.extend(_get_subgraph_all_nodes(c))
+    return nodes
+
+
+def _get_all_subgraphs_ordered(subgraphs: List[Subgraph]) -> List[Subgraph]:
+    result = []
+    for s in subgraphs:
+        result.append(s)
+        result.extend(_get_all_subgraphs_ordered(s.children))
+    return result
+
+
+def _is_in_subgraph_hierarchy(parent_sub: Subgraph, target_id: str) -> bool:
+    if parent_sub.id == target_id or target_id in parent_sub.node_ids:
+        return True
+    return any(_is_in_subgraph_hierarchy(c, target_id) for c in parent_sub.children)
+
+
 def compile_flowchart_to_vsdx(
     diagram: FlowchartDiagram,
     output_path: str,
@@ -43,10 +72,17 @@ def compile_flowchart_to_vsdx(
 ) -> str:
     palette = PALETTES.get(palette_name, PALETTES[DEFAULT_PALETTE_NAME])
 
-    # 1. Text sizing heuristics for each node
+    all_subgraphs = _get_all_subgraphs_dict(diagram.subgraphs)
+
+    # 1. Filter out phantom nodes that are actually subgraph references
+    for sub_id in all_subgraphs:
+        if sub_id in diagram.nodes and diagram.nodes[sub_id].label == sub_id:
+            del diagram.nodes[sub_id]
+
+    # 2. Text sizing heuristics for each node
     node_dims: Dict[str, Tuple[float, float, str]] = {}
     node_subgraph: Dict[str, str] = {}
-    for sub in diagram.subgraphs:
+    for sub in all_subgraphs.values():
         for nid in sub.node_ids:
             node_subgraph[nid] = sub.id
 
@@ -62,13 +98,49 @@ def compile_flowchart_to_vsdx(
         node_dims[nid] = (w, h, node_subgraph.get(nid))
         node_wrapped_text[nid] = "\n".join(lines)
 
-    # 2. Extract edge pairs
-    edge_pairs = [(e.source_id, e.target_id) for e in diagram.edges]
+    # 3. Extract edge pairs for layout ranking, expanding subgraph endpoints to member nodes
+    edge_pairs: List[Tuple[str, str]] = []
+    for e in diagram.edges:
+        src_nodes = [e.source_id]
+        if e.source_id in all_subgraphs:
+            src_nodes = _get_subgraph_all_nodes(all_subgraphs[e.source_id])
+        dst_nodes = [e.target_id]
+        if e.target_id in all_subgraphs:
+            dst_nodes = _get_subgraph_all_nodes(all_subgraphs[e.target_id])
+        for s_node in src_nodes:
+            for d_node in dst_nodes:
+                if s_node in diagram.nodes and d_node in diagram.nodes:
+                    edge_pairs.append((s_node, d_node))
 
-    # 3. Extract subgraphs
-    subgraph_map = {s.id: (s.title, s.node_ids) for s in diagram.subgraphs}
+    # Add topological precedence for top-level subgraphs:
+    # If an edge enters a top-level subgraph (directly or via any descendant),
+    # all nodes in that top-level subgraph must follow the source nodes.
+    for e in diagram.edges:
+        target_top = None
+        for top_s in diagram.subgraphs:
+            if _is_in_subgraph_hierarchy(top_s, e.target_id):
+                target_top = top_s
+                break
+        if target_top:
+            if _is_in_subgraph_hierarchy(target_top, e.source_id):
+                continue
+            src_nodes = [e.source_id]
+            if e.source_id in all_subgraphs:
+                src_nodes = _get_subgraph_all_nodes(all_subgraphs[e.source_id])
+            top_nodes = _get_subgraph_all_nodes(target_top)
+            for s_n in src_nodes:
+                if s_n in diagram.nodes:
+                    for t_n in top_nodes:
+                        if t_n in diagram.nodes and t_n != s_n:
+                            edge_pairs.append((s_n, t_n))
 
-    # 4. Run Sugiyama topological layout
+    # 4. Extract subgraphs for layout synthesis
+    subgraph_map = {
+        s_id: (s.title, _get_subgraph_all_nodes(s))
+        for s_id, s in all_subgraphs.items()
+    }
+
+    # 5. Run Sugiyama topological layout
     layout_engine = SugiyamaLayoutEngine(
         direction=diagram.direction,
         rank_gap=1.0,
@@ -81,61 +153,9 @@ def compile_flowchart_to_vsdx(
     connects_xml_list: List[str] = []
     shape_id_counter = 1
     node_to_shape_id: Dict[str, int] = {}
-
-    # 5. Render Subgraph Containers (rendered first so nodes draw on top)
-    for sub_id, sub_info in layout_res.subgraphs.items():
-        cont_id = shape_id_counter
-        shape_id_counter += 1
-
-        # Container bounding box
-        cont_xml = build_2d_shape_xml(
-            shape_id=cont_id,
-            name=f"Container_{sub_id}",
-            pin_x=sub_info.pin_x,
-            pin_y=sub_info.pin_y,
-            width=sub_info.width,
-            height=sub_info.height,
-            text="",
-            shape_type="rectangle",
-            fill_color=palette.subgraph_fill,
-            line_color=palette.subgraph_border,
-            line_weight_in=0.0208,
-            line_pattern=2,  # Dashed boundary
-            rounding_in=0.1,
-            is_container=True,
-        )
-        shapes_xml_list.append(cont_xml)
-
-        # Header banner for title
-        hdr_id = shape_id_counter
-        shape_id_counter += 1
-        hdr_w = max(2.2, min(sub_info.width - 0.4, 4.0))
-        hdr_h = 0.35
-        hdr_pin_x = sub_info.pin_x
-        hdr_pin_y = sub_info.pin_y + sub_info.height / 2.0 - hdr_h / 2.0 - 0.05
-
-        hdr_xml = build_2d_shape_xml(
-            shape_id=hdr_id,
-            name=f"Header_{sub_id}",
-            pin_x=hdr_pin_x,
-            pin_y=hdr_pin_y,
-            width=hdr_w,
-            height=hdr_h,
-            text=sub_info.title,
-            shape_type="rectangle",
-            fill_color=palette.subgraph_border,
-            line_color=palette.subgraph_border,
-            text_color="#ffffff" if is_dark_color(palette.subgraph_border) else palette.subgraph_text,
-            line_weight_in=0.01,
-            rounding_in=0.05,
-            font_name=font_name,
-            font_size_pt=9.0,
-            has_connections=False,
-        )
-        shapes_xml_list.append(hdr_xml)
+    node_extra_connections = defaultdict(list)
 
     # 5b. Pre-calculate connector endpoints and distribute connection ports
-    # Assign distinct sides for decision diamond branches:
     diamond_outgoing = defaultdict(list)
     for idx, edge in enumerate(diagram.edges):
         if edge.source_id in diagram.nodes and diagram.nodes[edge.source_id].shape == ShapeType.DIAMOND:
@@ -146,10 +166,10 @@ def compile_flowchart_to_vsdx(
     dst_port_groups = defaultdict(list)
 
     for idx, edge in enumerate(diagram.edges):
-        if edge.source_id not in layout_res.nodes or edge.target_id not in layout_res.nodes:
+        src_node = layout_res.nodes.get(edge.source_id) or layout_res.subgraphs.get(edge.source_id)
+        dst_node = layout_res.nodes.get(edge.target_id) or layout_res.subgraphs.get(edge.target_id)
+        if not src_node or not dst_node:
             continue
-        src_node = layout_res.nodes[edge.source_id]
-        dst_node = layout_res.nodes[edge.target_id]
 
         bx, by, ex, ey, src_port, dst_port, src_part, dst_part = calculate_connector_endpoints_and_ports(
             src_x=src_node.pin_x,
@@ -184,16 +204,23 @@ def compile_flowchart_to_vsdx(
         dst_port_groups[(edge.target_id, dst_port)].append(idx)
 
     # Distribute connection points along sides with multiple edges
-    node_extra_connections = defaultdict(list)
-
     for (nid, side), edge_indices in src_port_groups.items():
         if len(edge_indices) > 1:
-            node = layout_res.nodes[nid]
+            node = layout_res.nodes.get(nid) or layout_res.subgraphs.get(nid)
+            if not node:
+                continue
             k = len(edge_indices)
+            def _get_dst_y(i):
+                t = layout_res.nodes.get(diagram.edges[i].target_id) or layout_res.subgraphs.get(diagram.edges[i].target_id)
+                return t.pin_y if t else 0.0
+            def _get_dst_x(i):
+                t = layout_res.nodes.get(diagram.edges[i].target_id) or layout_res.subgraphs.get(diagram.edges[i].target_id)
+                return t.pin_x if t else 0.0
+
             if side in ("Left", "Right"):
-                edge_indices.sort(key=lambda i: layout_res.nodes[diagram.edges[i].target_id].pin_y)
+                edge_indices.sort(key=_get_dst_y)
             else:
-                edge_indices.sort(key=lambda i: layout_res.nodes[diagram.edges[i].target_id].pin_x)
+                edge_indices.sort(key=_get_dst_x)
 
             for order_idx, e_idx in enumerate(edge_indices):
                 frac = (order_idx + 1.0) / (k + 1.0)
@@ -224,12 +251,21 @@ def compile_flowchart_to_vsdx(
 
     for (nid, side), edge_indices in dst_port_groups.items():
         if len(edge_indices) > 1:
-            node = layout_res.nodes[nid]
+            node = layout_res.nodes.get(nid) or layout_res.subgraphs.get(nid)
+            if not node:
+                continue
             k = len(edge_indices)
+            def _get_src_y(i):
+                s = layout_res.nodes.get(diagram.edges[i].source_id) or layout_res.subgraphs.get(diagram.edges[i].source_id)
+                return s.pin_y if s else 0.0
+            def _get_src_x(i):
+                s = layout_res.nodes.get(diagram.edges[i].source_id) or layout_res.subgraphs.get(diagram.edges[i].source_id)
+                return s.pin_x if s else 0.0
+
             if side in ("Left", "Right"):
-                edge_indices.sort(key=lambda i: layout_res.nodes[diagram.edges[i].source_id].pin_y)
+                edge_indices.sort(key=_get_src_y)
             else:
-                edge_indices.sort(key=lambda i: layout_res.nodes[diagram.edges[i].source_id].pin_x)
+                edge_indices.sort(key=_get_src_x)
 
             for order_idx, e_idx in enumerate(edge_indices):
                 frac = (order_idx + 1.0) / (k + 1.0)
@@ -257,6 +293,64 @@ def compile_flowchart_to_vsdx(
                     node_extra_connections[nid].append((port_name, node.width * frac, node.height, fx, fy))
                 edge_port_info[e_idx]["ex"] = round(ex, 4)
                 edge_port_info[e_idx]["ey"] = round(ey, 4)
+
+    # 5c. Render Subgraph Containers (rendered in topological order: parents then children)
+    for sub in _get_all_subgraphs_ordered(diagram.subgraphs):
+        sub_id = sub.id
+        if sub_id not in layout_res.subgraphs:
+            continue
+        sub_info = layout_res.subgraphs[sub_id]
+        cont_id = shape_id_counter
+        shape_id_counter += 1
+        node_to_shape_id[sub_id] = cont_id
+
+        # Container bounding box
+        cont_xml = build_2d_shape_xml(
+            shape_id=cont_id,
+            name=f"Container_{sub_id}",
+            pin_x=sub_info.pin_x,
+            pin_y=sub_info.pin_y,
+            width=sub_info.width,
+            height=sub_info.height,
+            text="",
+            shape_type="rectangle",
+            fill_color=palette.subgraph_fill,
+            line_color=palette.subgraph_border,
+            line_weight_in=0.0208,
+            line_pattern=2,  # Dashed boundary
+            rounding_in=0.1,
+            is_container=True,
+            extra_connections=node_extra_connections.get(sub_id),
+        )
+        shapes_xml_list.append(cont_xml)
+
+        # Header banner for title
+        hdr_id = shape_id_counter
+        shape_id_counter += 1
+        hdr_w = max(2.2, min(sub_info.width - 0.4, 5.0))
+        hdr_h = 0.35
+        hdr_pin_x = sub_info.pin_x
+        hdr_pin_y = sub_info.pin_y + sub_info.height / 2.0 - hdr_h / 2.0 - 0.05
+
+        hdr_xml = build_2d_shape_xml(
+            shape_id=hdr_id,
+            name=f"Header_{sub_id}",
+            pin_x=hdr_pin_x,
+            pin_y=hdr_pin_y,
+            width=hdr_w,
+            height=hdr_h,
+            text=sub_info.title,
+            shape_type="rectangle",
+            fill_color=palette.subgraph_border,
+            line_color=palette.subgraph_border,
+            text_color="#ffffff" if is_dark_color(palette.subgraph_border) else palette.subgraph_text,
+            line_weight_in=0.01,
+            rounding_in=0.05,
+            font_name=font_name,
+            font_size_pt=9.0,
+            has_connections=False,
+        )
+        shapes_xml_list.append(hdr_xml)
 
     # 6. Render 2D Node Shapes
     for nid, node in diagram.nodes.items():

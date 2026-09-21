@@ -1,5 +1,5 @@
 """
-Comprehensive test suite verifying all 12 visual & drawing quality audit fixes
+Comprehensive test suite verifying visual & drawing quality features
 for mermaid-to-vsdx on Windows.
 """
 
@@ -33,7 +33,7 @@ from mermaid_to_vsdx.compiler.sequence_compiler import compile_sequence_to_vsdx
 from mermaid_to_vsdx.compiler.state_compiler import compile_state_diagram_to_vsdx
 
 
-class TestAuditDrawingFixes(unittest.TestCase):
+class TestDrawingQualityFeatures(unittest.TestCase):
     def setUp(self):
         self.output_dir = os.path.join(os.path.dirname(__file__), "output")
         os.makedirs(self.output_dir, exist_ok=True)
@@ -275,6 +275,51 @@ class TestAuditDrawingFixes(unittest.TestCase):
         )
         for cell_name in ["TxtPinX", "TxtPinY", "TxtWidth", "TxtHeight", "TxtLocPinX", "TxtLocPinY", "TxtAngle"]:
             self.assertIn(f"<Cell N='{cell_name}'", shape_xml)
+
+    # Item 12: Ampersand chaining, nested subgraphs, and XML escaping
+    def test_item12_ampersand_chaining_and_nested_subgraphs(self):
+        mmd = """flowchart LR
+    subgraph SENSOR_ALANI ["TEU: Akustik Dizin"]
+        direction TB
+        PZT1["Sensor 1"]
+        PZT2["Sensor 2"]
+        PZT_CONN["Connector"]
+        PZT1 & PZT2 --> PZT_CONN
+    end
+    subgraph OUTER ["Outer Box"]
+        direction TB
+        subgraph INNER1 ["Power Rail"]
+            PWR1["Power 1"]
+            PWR2["Power 2"]
+            PWR1 --> PWR2
+        end
+        subgraph INNER2 ["Channels"]
+            CH1["Channel 1"]
+            CH2["Channel 2"]
+        end
+    end
+    PZT_CONN --> INNER2
+    PWR1 -.-> CH1
+    PWR2 -.-> CH2
+"""
+        diag = FlowchartParser().parse(mmd)
+        vsdx_path = os.path.join(self.output_dir, "test_nested_subgraphs.vsdx")
+        compile_flowchart_to_vsdx(diag, vsdx_path)
+
+        # Validate that the generated VSDX package has 100% well-formed XML
+        with zipfile.ZipFile(vsdx_path, "r") as zf:
+            for name in zf.namelist():
+                if name.endswith(".xml"):
+                    data = zf.read(name)
+                    # Must parse without xml.etree.ElementTree.ParseError
+                    root = ET.fromstring(data)
+                    self.assertIsNotNone(root)
+
+        page_xml = self._get_page_xml(vsdx_path)
+        # Verify containers and shapes were properly synthesized
+        self.assertIn("Container_OUTER", page_xml)
+        self.assertIn("Container_INNER1", page_xml)
+        self.assertIn("Container_INNER2", page_xml)
 
 
 if __name__ == "__main__":

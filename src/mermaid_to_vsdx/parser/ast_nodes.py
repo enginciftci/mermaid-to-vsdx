@@ -68,6 +68,7 @@ class Subgraph:
     title: str
     node_ids: List[str] = field(default_factory=list)
     children: List["Subgraph"] = field(default_factory=list)
+    direction: Optional[str] = None
 
 
 @dataclass

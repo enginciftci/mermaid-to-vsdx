@@ -32,9 +32,11 @@ def escape_xml(text: str) -> str:
 
 def build_cell(name: str, val: str, formula: Optional[str] = None, unit: Optional[str] = None) -> str:
     """Renders a single ShapeSheet <Cell> element."""
-    attrs = [f"N='{name}'", f"V='{val}'"]
+    escaped_val = escape_xml(val)
+    attrs = [f"N='{name}'", f"V='{escaped_val}'"]
     if formula:
-        attrs.append(f"F='{formula}'")
+        escaped_formula = escape_xml(formula)
+        attrs.append(f"F='{escaped_formula}'")
     if unit:
         attrs.append(f"U='{unit}'")
     return f"<Cell {' '.join(attrs)}/>"
@@ -576,7 +578,7 @@ def build_2d_shape_xml(
 </Row></Section>"""
 
     conn_section = ""
-    if not is_container and has_connections:
+    if has_connections:
         w_rnd = round(width, 4)
         w05_rnd = round(width * 0.5, 4)
         h_rnd = round(height, 4)
@@ -601,8 +603,9 @@ def build_2d_shape_xml(
 
     text_element = f"<Text><cp IX='0'/><pp IX='0'/>{escaped_text}</Text>" if text else ""
 
+    escaped_name = escape_xml(name)
     xml_lines = [
-        f"<Shape ID='{shape_id}' NameU='{name}' Name='{name}' Type='Shape' LineStyle='3' FillStyle='3' TextStyle='3'>",
+        f"<Shape ID='{shape_id}' NameU='{escaped_name}' Name='{escaped_name}' Type='Shape' LineStyle='3' FillStyle='3' TextStyle='3'>",
         "\n".join(cells),
         user_section,
         conn_section,
@@ -669,7 +672,8 @@ def build_group_shape_xml(
 </Section>"""
 
     children_str = "\n".join(child_shapes_xml)
-    return f"""<Shape ID='{group_id}' NameU='{name}' Name='{name}' Type='Group' LineStyle='3' FillStyle='3' TextStyle='3'>
+    escaped_name = escape_xml(name)
+    return f"""<Shape ID='{group_id}' NameU='{escaped_name}' Name='{escaped_name}' Type='Group' LineStyle='3' FillStyle='3' TextStyle='3'>
 {chr(10).join(cells)}
 {conn_section}
 <Shapes>

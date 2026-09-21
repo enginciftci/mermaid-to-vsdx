@@ -172,7 +172,7 @@ class SugiyamaLayoutEngine:
         if self.direction in ("BT", "RL"):
             rank_keys = sorted(ranks.keys(), reverse=True)
 
-        for rk in rank_keys:
+        for idx_rk, rk in enumerate(rank_keys):
             r_nodes = ranks[rk]
             # Calculate maximum thickness of this rank
             if is_horizontal:
@@ -189,18 +189,33 @@ class SugiyamaLayoutEngine:
                     total_cross_len += self.node_gap
 
             cross_pos = 0.0
-            for nid in r_nodes:
+            for idx_n, nid in enumerate(r_nodes):
                 node = layout_nodes[nid]
+                eff_node_gap = self.node_gap
+                if idx_n + 1 < len(r_nodes):
+                    nxt_n = layout_nodes[r_nodes[idx_n + 1]]
+                    if node.subgraph_id != nxt_n.subgraph_id and (node.subgraph_id or nxt_n.subgraph_id):
+                        eff_node_gap = max(self.node_gap, 1.6)
+
                 if is_horizontal:
                     node.screen_x = current_rank_pos + rank_thickness / 2.0
                     node.screen_y = cross_pos + node.height / 2.0
-                    cross_pos += node.height + self.node_gap
+                    cross_pos += node.height + eff_node_gap
                 else:
                     node.screen_x = cross_pos + node.width / 2.0
                     node.screen_y = current_rank_pos + rank_thickness / 2.0
-                    cross_pos += node.width + self.node_gap
+                    cross_pos += node.width + eff_node_gap
 
-            current_rank_pos += rank_thickness + self.rank_gap
+            eff_gap = self.rank_gap
+            if idx_rk + 1 < len(rank_keys):
+                nxt_rk = rank_keys[idx_rk + 1]
+                nxt_nodes = ranks[nxt_rk]
+                curr_subs = {layout_nodes[n].subgraph_id for n in r_nodes if not layout_nodes[n].is_dummy and layout_nodes[n].subgraph_id}
+                nxt_subs = {layout_nodes[n].subgraph_id for n in nxt_nodes if not layout_nodes[n].is_dummy and layout_nodes[n].subgraph_id}
+                if curr_subs != nxt_subs and (curr_subs or nxt_subs):
+                    eff_gap = max(self.rank_gap, 1.8)
+
+            current_rank_pos += rank_thickness + eff_gap
 
         # 5. Center alignment across ranks
         # Find maximum cross dimension
@@ -227,23 +242,21 @@ class SugiyamaLayoutEngine:
                 for n in r_nodes:
                     layout_nodes[n].screen_x += offset_x
 
-        # 6. Subgraphs bounding box synthesis with header headroom
+        # 6. Subgraphs bounding box synthesis with cross-axis collision resolution
         layout_subgraphs: Dict[str, LayoutSubgraph] = {}
         if subgraphs:
-            pad = 0.5
-            header_h = 0.45
-            for sub_id, (sub_title, sub_nids) in subgraphs.items():
+            def _calc_sub_bounds(sub_id: str, sub_title: str, sub_nids: List[str]) -> Optional[LayoutSubgraph]:
                 member_nodes = [layout_nodes[n] for n in sub_nids if n in layout_nodes and not layout_nodes[n].is_dummy]
                 if not member_nodes:
-                    continue
+                    return None
+                is_parent = any(layout_nodes[n].subgraph_id != sub_id for n in sub_nids if n in layout_nodes)
+                pad = 0.85 if is_parent else 0.45
+                header_h = 0.55 if is_parent else 0.45
                 s_min_x = min(n.screen_x - n.width / 2.0 for n in member_nodes) - pad
                 s_max_x = max(n.screen_x + n.width / 2.0 for n in member_nodes) + pad
                 s_min_y = min(n.screen_y - n.height / 2.0 for n in member_nodes) - pad - header_h
                 s_max_y = max(n.screen_y + n.height / 2.0 for n in member_nodes) + pad
-
-                sw = s_max_x - s_min_x
-                sh = s_max_y - s_min_y
-                layout_subgraphs[sub_id] = LayoutSubgraph(
+                return LayoutSubgraph(
                     id=sub_id,
                     title=sub_title,
                     node_ids=[n for n in sub_nids if n in layout_nodes and not layout_nodes[n].is_dummy],
@@ -251,9 +264,66 @@ class SugiyamaLayoutEngine:
                     max_x=s_max_x,
                     min_y=s_min_y,
                     max_y=s_max_y,
-                    width=sw,
-                    height=sh,
+                    width=s_max_x - s_min_x,
+                    height=s_max_y - s_min_y,
                 )
+
+            for sub_id, (sub_title, sub_nids) in subgraphs.items():
+                ls = _calc_sub_bounds(sub_id, sub_title, sub_nids)
+                if ls:
+                    layout_subgraphs[sub_id] = ls
+
+            # Identify leaf subgraphs
+            leaf_sub_ids = [
+                sub_id for sub_id, (sub_title, sub_nids) in subgraphs.items()
+                if not any(layout_nodes[n].subgraph_id != sub_id for n in sub_nids if n in layout_nodes)
+            ]
+
+            # Cross-axis collision resolution between sibling leaf subgraphs
+            if is_horizontal:
+                leaf_sub_ids.sort(key=lambda sid: layout_subgraphs[sid].min_y if sid in layout_subgraphs else 0)
+            else:
+                leaf_sub_ids.sort(key=lambda sid: layout_subgraphs[sid].min_x if sid in layout_subgraphs else 0)
+
+            shifted_any = False
+            for i in range(len(leaf_sub_ids)):
+                for j in range(i + 1, len(leaf_sub_ids)):
+                    sid_a = leaf_sub_ids[i]
+                    sid_b = leaf_sub_ids[j]
+                    if sid_a not in layout_subgraphs or sid_b not in layout_subgraphs:
+                        continue
+                    sub_a = layout_subgraphs[sid_a]
+                    sub_b = layout_subgraphs[sid_b]
+
+                    if is_horizontal:
+                        overlap_x = not (sub_a.max_x < sub_b.min_x or sub_b.max_x < sub_a.min_x)
+                        if overlap_x:
+                            overlap_y = (sub_a.max_y + 0.4) - sub_b.min_y
+                            if overlap_y > 0:
+                                for nid in subgraphs[sid_b][1]:
+                                    if nid in layout_nodes:
+                                        layout_nodes[nid].screen_y += overlap_y
+                                sub_b.min_y += overlap_y
+                                sub_b.max_y += overlap_y
+                                shifted_any = True
+                    else:
+                        overlap_y = not (sub_a.max_y < sub_b.min_y or sub_b.max_y < sub_a.min_y)
+                        if overlap_y:
+                            overlap_x = (sub_a.max_x + 0.4) - sub_b.min_x
+                            if overlap_x > 0:
+                                for nid in subgraphs[sid_b][1]:
+                                    if nid in layout_nodes:
+                                        layout_nodes[nid].screen_x += overlap_x
+                                sub_b.min_x += overlap_x
+                                sub_b.max_x += overlap_x
+                                shifted_any = True
+
+            # If any nodes were shifted, recalculate all subgraph bounding boxes
+            if shifted_any:
+                for sub_id, (sub_title, sub_nids) in subgraphs.items():
+                    ls = _calc_sub_bounds(sub_id, sub_title, sub_nids)
+                    if ls:
+                        layout_subgraphs[sub_id] = ls
 
         # Calculate total diagram bounds
         all_min_x = min(n.screen_x - n.width / 2.0 for n in layout_nodes.values()) if layout_nodes else 0.0

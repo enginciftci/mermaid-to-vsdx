@@ -84,6 +84,19 @@ class FlowchartParser:
             self._handle_subgraph_end(line_num, line)
             return
 
+        # Handle direction directive inside subgraph or diagram
+        if re.match(r'^direction\s+(TB|TD|LR|RL|BT)\b', line, re.IGNORECASE):
+            m_dir = re.match(r'^direction\s+([A-Za-z]{2})', line, re.IGNORECASE)
+            if m_dir:
+                dir_val = m_dir.group(1).upper()
+                if dir_val == "TB":
+                    dir_val = "TD"
+                if self.subgraph_stack:
+                    self.subgraph_stack[-1].direction = dir_val
+                else:
+                    self.diagram.direction = dir_val
+            return
+
         # Ignore classDef, style, click, linkStyle lines for AST structure
         if re.match(r'^(classDef|class|style|click|linkStyle)\b', line, re.IGNORECASE):
             return
@@ -139,37 +152,39 @@ class FlowchartParser:
     def _parse_statement(self, line: str, line_num: int):
         # A statement can be a single node or a chain of connections
         # e.g., A[Node A] -->|Label| B(Node B) --> C
-        # Let's split on edge operators while preserving labels
-        # Edge operators:
-        # --> , --- , -.-> , -.- , ==> , ==
-        # With pipe labels: -->|text|
-        # Or infix labels: -- text --> , -. text .-> , == text ==>
-
+        # Or multi-node: A & B --> C & D
         tokens, edges_meta = self._split_edges(line)
         if not tokens:
             return
 
-        parsed_nodes = []
+        parsed_groups: List[List[Node]] = []
         for token in tokens:
-            node = self._parse_node_spec(token.strip())
-            if node:
-                self._register_node(node)
-                parsed_nodes.append(node)
+            specs = self._split_node_group(token.strip())
+            group_nodes = []
+            for spec in specs:
+                node = self._parse_node_spec(spec.strip())
+                if node:
+                    self._register_node(node)
+                    group_nodes.append(node)
+            if group_nodes:
+                parsed_groups.append(group_nodes)
 
-        # Connect consecutive nodes
+        # Connect consecutive groups
         for i, edge_info in enumerate(edges_meta):
-            if i < len(parsed_nodes) - 1:
-                src = parsed_nodes[i]
-                tgt = parsed_nodes[i + 1]
-                edge = Edge(
-                    source_id=src.id,
-                    target_id=tgt.id,
-                    label=edge_info.get("label", ""),
-                    style=edge_info.get("style", EdgeStyle.SOLID),
-                    arrow_start=edge_info.get("arrow_start", ArrowType.NONE),
-                    arrow_end=edge_info.get("arrow_end", ArrowType.ARROW)
-                )
-                self.diagram.edges.append(edge)
+            if i < len(parsed_groups) - 1:
+                src_group = parsed_groups[i]
+                tgt_group = parsed_groups[i + 1]
+                for src in src_group:
+                    for tgt in tgt_group:
+                        edge = Edge(
+                            source_id=src.id,
+                            target_id=tgt.id,
+                            label=edge_info.get("label", ""),
+                            style=edge_info.get("style", EdgeStyle.SOLID),
+                            arrow_start=edge_info.get("arrow_start", ArrowType.NONE),
+                            arrow_end=edge_info.get("arrow_end", ArrowType.ARROW)
+                        )
+                        self.diagram.edges.append(edge)
 
     def _register_node(self, node: Node):
         if node.id not in self.diagram.nodes:
@@ -209,6 +224,48 @@ class FlowchartParser:
         if node_id:
             return Node(id=node_id, label=node_id, shape=ShapeType.RECTANGLE)
         return None
+
+    def _split_node_group(self, group_str: str) -> List[str]:
+        """
+        Splits a node group string on '&' operators at the top level.
+        e.g. 'A & B' -> ['A', 'B']
+        'A[\"Amp & Volt\"] & B' -> ['A[\"Amp & Volt\"]', 'B']
+        """
+        parts = []
+        current = []
+        in_quote = False
+        quote_char = ""
+        bracket_depth = 0
+
+        for ch in group_str:
+            if in_quote:
+                current.append(ch)
+                if ch == quote_char:
+                    in_quote = False
+            else:
+                if ch in ('"', "'"):
+                    in_quote = True
+                    quote_char = ch
+                    current.append(ch)
+                elif ch in ('[', '(', '{'):
+                    bracket_depth += 1
+                    current.append(ch)
+                elif ch in (']', ')', '}'):
+                    if bracket_depth > 0:
+                        bracket_depth -= 1
+                    current.append(ch)
+                elif ch == '&' and bracket_depth == 0:
+                    part = "".join(current).strip()
+                    if part:
+                        parts.append(part)
+                    current = []
+                else:
+                    current.append(ch)
+
+        part = "".join(current).strip()
+        if part:
+            parts.append(part)
+        return parts
 
     def _split_edges(self, line: str) -> Tuple[List[str], List[dict]]:
         """
