@@ -31,7 +31,10 @@ SHAPE_MAP = {
     ShapeType.DIAMOND: "diamond",
     ShapeType.HEXAGON: "hexagon",
     ShapeType.PARALLELOGRAM: "parallelogram_right",
+    ShapeType.PARALLELOGRAM_ALT: "parallelogram_left",
     ShapeType.TRAPEZOID: "trapezoid",
+    ShapeType.TRAPEZOID_ALT: "trapezoid_inverted",
+    ShapeType.DOUBLE_CIRCLE: "double_circle",
 }
 
 
@@ -88,13 +91,37 @@ def compile_flowchart_to_vsdx(
 
     node_wrapped_text: Dict[str, str] = {}
     for nid, node in diagram.nodes.items():
+        if node.shape == ShapeType.CYLINDER:
+            min_w = 1.6
+            min_h = 1.10
+        elif node.shape in (ShapeType.PARALLELOGRAM, ShapeType.PARALLELOGRAM_ALT, ShapeType.TRAPEZOID, ShapeType.TRAPEZOID_ALT):
+            min_w = 1.85
+            min_h = 0.92
+        elif node.shape == ShapeType.ASYMMETRIC:
+            min_w = 1.85
+            min_h = 0.90
+        elif node.shape == ShapeType.DIAMOND:
+            min_w = 1.85
+            min_h = 0.95
+        elif node.shape == ShapeType.HEXAGON:
+            min_w = 1.80
+            min_h = 0.85
+        else:
+            min_w = 1.5
+            min_h = 0.75
+
         w, h, lines = estimate_text_dimensions(
             text=node.label,
             font_size_pt=10.0,
-            min_width_in=1.8 if node.shape == ShapeType.DIAMOND else 1.5,
-            min_height_in=0.9 if node.shape == ShapeType.DIAMOND else 0.75,
+            min_width_in=min_w,
+            min_height_in=min_h,
             max_width_in=3.2,
         )
+
+        # Enforce 3D aspect ratio proportion for cylinders so they stay volumetric
+        if node.shape == ShapeType.CYLINDER:
+            h = max(h, min_h, round(w * 0.60, 3))
+
         node_dims[nid] = (w, h, node_subgraph.get(nid))
         node_wrapped_text[nid] = "\n".join(lines)
 

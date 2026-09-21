@@ -29,8 +29,8 @@ class ShapeType(Enum):
     HEXAGON = "hexagon"              # {{text}}
     PARALLELOGRAM = "parallelogram"  # [/text/] or [\text\]
     PARALLELOGRAM_ALT = "parallelogram_left"
-    TRAPEZOID = "trapezoid"          # [/text\] or [\text/]
-    TRAPEZOID_ALT = "trapezoid"
+    TRAPEZOID = "trapezoid"          # [/text\]
+    TRAPEZOID_ALT = "trapezoid_inverted"  # [\text/]
     DOUBLE_CIRCLE = "double_circle"
     ROUNDED_RECT = "rounded"
 

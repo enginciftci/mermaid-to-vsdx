@@ -231,6 +231,13 @@ def render_vsdx_to_png(
             border_w = max(1, int(0.016 * dpi))
             f_col = fill_col if fill_pat != 0 else None
 
+            is_cylinder = 'cylinder' in name_u.lower()
+            if not is_cylinder and geom_sec is not None:
+                for r in geom_sec.findall('{*}Row'):
+                    if r.attrib.get('T') == 'EllipticalArcTo':
+                        is_cylinder = True
+                        break
+
             if is_container:
                 tl = to_img(pin_x - w/2.0, pin_y + h/2.0)
                 br = to_img(pin_x + w/2.0, pin_y - h/2.0)
@@ -238,8 +245,24 @@ def render_vsdx_to_png(
                     draw_dashed_rect(draw, tl, br, fill=f_col, outline=line_col, width=border_w)
                 else:
                     draw.rounded_rectangle([tl, br], radius=8, fill=f_col, outline=line_col, width=border_w)
+            elif is_cylinder and w > 0 and h > 0:
+                cap_h_in = h * 0.28
+                cap_h_px = cap_h_in * dpi
+                tl_b = to_img(pin_x - w/2.0, pin_y + h/2.0 - cap_h_in/2.0)
+                br_b = to_img(pin_x + w/2.0, pin_y - h/2.0 + cap_h_in/2.0)
+                tl_bot = (tl_b[0], br_b[1] - cap_h_px/2.0)
+                br_bot = (br_b[0], br_b[1] + cap_h_px/2.0)
+                if f_col:
+                    draw.pieslice([tl_bot, br_bot], start=0, end=180, fill=f_col, outline=None)
+                    draw.rectangle([tl_b, br_b], fill=f_col, outline=None)
+                draw.arc([tl_bot, br_bot], start=0, end=180, fill=line_col, width=border_w)
+                draw.line([(tl_b[0], tl_b[1]), (tl_b[0], br_b[1])], fill=line_col, width=border_w)
+                draw.line([(br_b[0], tl_b[1]), (br_b[0], br_b[1])], fill=line_col, width=border_w)
+                tl_top = (tl_b[0], tl_b[1] - cap_h_px/2.0)
+                br_top = (br_b[0], tl_b[1] + cap_h_px/2.0)
+                draw.ellipse([tl_top, br_top], fill=f_col, outline=line_col, width=border_w)
             elif geom_pts and len(geom_pts) >= 3:
-                # Polygon or custom shape (diamond, hexagon, cylinder, etc.)
+                # Polygon or custom shape (diamond, hexagon, asymmetric, parallelogram, etc.)
                 draw.polygon(geom_pts, fill=f_col, outline=line_col)
             elif w > 0 and h > 0:
                 tl = to_img(pin_x - w/2.0, pin_y + h/2.0)

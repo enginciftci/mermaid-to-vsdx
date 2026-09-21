@@ -346,34 +346,37 @@ def get_shape_geometry_xml(shape_type: str, width: float, height: float, roundin
         return sec0
 
     elif st in ("cylinder", "database"):
-        h02 = round(height * 0.2, 4)
-        h08 = round(height * 0.8, 4)
-        h095 = round(height * 0.95, 4)
-        h005 = round(height * 0.05, 4)
-        h065 = round(height * 0.65, 4)
+        h_base = round(height * 0.14, 4)
+        h_top = round(height * 0.86, 4)
+        h_top_apex = round(height * 1.0, 4)
+        h_top_lower = round(height * 0.72, 4)
+        h_bot_curve = round(height * 0.0, 4)
+        w05 = round(width * 0.5, 4)
+        d_val = round((height * 0.14) / max(0.001, (width * 0.5)), 4)
+        d_formula = "(Height*0.14)/(Width*0.5)"
         return f"""<Section N='Geometry' IX='0'>
   <Cell N='NoFill' V='0'/><Cell N='NoLine' V='0'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
-  <Row T='MoveTo' IX='1'><Cell N='X' V='0' F='Width*0'/><Cell N='Y' V='{h02}' F='Height*0.2'/></Row>
-  <Row T='LineTo' IX='2'><Cell N='X' V='0' F='Width*0'/><Cell N='Y' V='{h08}' F='Height*0.8'/></Row>
+  <Row T='MoveTo' IX='1'><Cell N='X' V='0' F='Width*0'/><Cell N='Y' V='{h_base}' F='Height*0.14'/></Row>
+  <Row T='LineTo' IX='2'><Cell N='X' V='0' F='Width*0'/><Cell N='Y' V='{h_top}' F='Height*0.86'/></Row>
   <Row T='EllipticalArcTo' IX='3'>
-    <Cell N='X' V='{w1}' F='Width*1'/><Cell N='Y' V='{h08}' F='Height*0.8'/>
-    <Cell N='A' V='{w05}' F='Width*0.5'/><Cell N='B' V='{h095}' F='Height*0.95'/>
-    <Cell N='C' V='0'/><Cell N='D' V='0.2'/>
+    <Cell N='X' V='{w1}' F='Width*1'/><Cell N='Y' V='{h_top}' F='Height*0.86'/>
+    <Cell N='A' V='{w05}' F='Width*0.5'/><Cell N='B' V='{h_top_apex}' F='Height*1'/>
+    <Cell N='C' V='0'/><Cell N='D' V='{d_val}' F='{d_formula}'/>
   </Row>
-  <Row T='LineTo' IX='4'><Cell N='X' V='{w1}' F='Width*1'/><Cell N='Y' V='{h02}' F='Height*0.2'/></Row>
+  <Row T='LineTo' IX='4'><Cell N='X' V='{w1}' F='Width*1'/><Cell N='Y' V='{h_base}' F='Height*0.14'/></Row>
   <Row T='EllipticalArcTo' IX='5'>
-    <Cell N='X' V='0' F='Width*0'/><Cell N='Y' V='{h02}' F='Height*0.2'/>
-    <Cell N='A' V='{w05}' F='Width*0.5'/><Cell N='B' V='{h005}' F='Height*0.05'/>
-    <Cell N='C' V='0'/><Cell N='D' V='0.2'/>
+    <Cell N='X' V='0' F='Width*0'/><Cell N='Y' V='{h_base}' F='Height*0.14'/>
+    <Cell N='A' V='{w05}' F='Width*0.5'/><Cell N='B' V='{h_bot_curve}' F='Height*0'/>
+    <Cell N='C' V='0'/><Cell N='D' V='{d_val}' F='{d_formula}'/>
   </Row>
 </Section>
 <Section N='Geometry' IX='1'>
   <Cell N='NoFill' V='1'/><Cell N='NoLine' V='0'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
-  <Row T='MoveTo' IX='1'><Cell N='X' V='0' F='Width*0'/><Cell N='Y' V='{h08}' F='Height*0.8'/></Row>
+  <Row T='MoveTo' IX='1'><Cell N='X' V='0' F='Width*0'/><Cell N='Y' V='{h_top}' F='Height*0.86'/></Row>
   <Row T='EllipticalArcTo' IX='2'>
-    <Cell N='X' V='{w1}' F='Width*1'/><Cell N='Y' V='{h08}' F='Height*0.8'/>
-    <Cell N='A' V='{w05}' F='Width*0.5'/><Cell N='B' V='{h065}' F='Height*0.65'/>
-    <Cell N='C' V='0'/><Cell N='D' V='0.2'/>
+    <Cell N='X' V='{w1}' F='Width*1'/><Cell N='Y' V='{h_top}' F='Height*0.86'/>
+    <Cell N='A' V='{w05}' F='Width*0.5'/><Cell N='B' V='{h_top_lower}' F='Height*0.72'/>
+    <Cell N='C' V='0'/><Cell N='D' V='{d_val}' F='{d_formula}'/>
   </Row>
 </Section>"""
 
@@ -414,26 +417,26 @@ def get_shape_geometry_xml(shape_type: str, width: float, height: float, roundin
 </Section>"""
 
     elif st in ("parallelogram_right", "parallelogram"):
-        w02 = round(width * 0.2, 4)
-        w08 = round(width * 0.8, 4)
+        w022 = round(width * 0.22, 4)
+        w078 = round(width * 0.78, 4)
         return f"""<Section N='Geometry' IX='0'>
   <Cell N='NoFill' V='0'/><Cell N='NoLine' V='0'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
-  <Row T='MoveTo' IX='1'><Cell N='X' V='{w02}' F='Width*0.2'/><Cell N='Y' V='0' F='Height*0'/></Row>
+  <Row T='MoveTo' IX='1'><Cell N='X' V='{w022}' F='Width*0.22'/><Cell N='Y' V='0' F='Height*0'/></Row>
   <Row T='LineTo' IX='2'><Cell N='X' V='{w1}' F='Width*1'/><Cell N='Y' V='0' F='Height*0'/></Row>
-  <Row T='LineTo' IX='3'><Cell N='X' V='{w08}' F='Width*0.8'/><Cell N='Y' V='{h1}' F='Height*1'/></Row>
+  <Row T='LineTo' IX='3'><Cell N='X' V='{w078}' F='Width*0.78'/><Cell N='Y' V='{h1}' F='Height*1'/></Row>
   <Row T='LineTo' IX='4'><Cell N='X' V='0' F='Width*0'/><Cell N='Y' V='{h1}' F='Height*1'/></Row>
-  <Row T='LineTo' IX='5'><Cell N='X' V='{w02}' F='Geometry1.X1'/><Cell N='Y' V='0' F='Geometry1.Y1'/></Row>
+  <Row T='LineTo' IX='5'><Cell N='X' V='{w022}' F='Geometry1.X1'/><Cell N='Y' V='0' F='Geometry1.Y1'/></Row>
 </Section>"""
 
     elif st in ("parallelogram_left",):
-        w02 = round(width * 0.2, 4)
-        w08 = round(width * 0.8, 4)
+        w022 = round(width * 0.22, 4)
+        w078 = round(width * 0.78, 4)
         return f"""<Section N='Geometry' IX='0'>
   <Cell N='NoFill' V='0'/><Cell N='NoLine' V='0'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
   <Row T='MoveTo' IX='1'><Cell N='X' V='0' F='Width*0'/><Cell N='Y' V='0' F='Height*0'/></Row>
-  <Row T='LineTo' IX='2'><Cell N='X' V='{w08}' F='Width*0.8'/><Cell N='Y' V='0' F='Height*0'/></Row>
+  <Row T='LineTo' IX='2'><Cell N='X' V='{w078}' F='Width*0.78'/><Cell N='Y' V='0' F='Height*0'/></Row>
   <Row T='LineTo' IX='3'><Cell N='X' V='{w1}' F='Width*1'/><Cell N='Y' V='{h1}' F='Height*1'/></Row>
-  <Row T='LineTo' IX='4'><Cell N='X' V='{w02}' F='Width*0.2'/><Cell N='Y' V='{h1}' F='Height*1'/></Row>
+  <Row T='LineTo' IX='4'><Cell N='X' V='{w022}' F='Width*0.22'/><Cell N='Y' V='{h1}' F='Height*1'/></Row>
   <Row T='LineTo' IX='5'><Cell N='X' V='0' F='Geometry1.X1'/><Cell N='Y' V='0' F='Geometry1.Y1'/></Row>
 </Section>"""
 
@@ -519,6 +522,10 @@ def build_2d_shape_xml(
     line_hex = rgb_to_hex(line_color)
     text_hex = rgb_to_hex(text_color)
     st = shape_type.lower() if shape_type else "rectangle"
+    txt_px = str(round(width * 0.44, 4)) if st in ("asymmetric",) else str(round(width * 0.5, 4))
+    txt_px_f = "Width*0.44" if st in ("asymmetric",) else "Width*0.5"
+    txt_py = str(round(height * 0.48, 4)) if st in ("cylinder", "database") else str(round(height * 0.5, 4))
+    txt_py_f = "Height*0.48" if st in ("cylinder", "database") else "Height*0.5"
 
     cells = [
         build_cell("PinX", str(pin_x)),
@@ -540,8 +547,8 @@ def build_2d_shape_xml(
         build_cell("TxtHeight", str(height), "Height*1"),
         build_cell("TxtLocPinX", str(round(width * 0.5, 4)), "TxtWidth*0.5"),
         build_cell("TxtLocPinY", str(round(height * 0.5, 4)), "TxtHeight*0.5"),
-        build_cell("TxtPinX", str(round(width * 0.5, 4)), "Width*0.5"),
-        build_cell("TxtPinY", str(round(height * 0.5, 4)), "Height*0.5"),
+        build_cell("TxtPinX", txt_px, txt_px_f),
+        build_cell("TxtPinY", txt_py, txt_py_f),
         build_cell("TxtAngle", "0"),
         build_cell("ObjType", "1"),
     ]

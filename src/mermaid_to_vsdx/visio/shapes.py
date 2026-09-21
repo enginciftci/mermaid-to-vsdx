@@ -186,9 +186,26 @@ def draw_node_shape(
         style_shape(shape, palette.decision_fill, palette.decision_border, line_weight_pt=1.5, rounding_in=0.05)
 
     elif shape_type == ShapeType.CYLINDER:
-        # Database cylinder
-        shape = page.DrawRectangle(x1, y1, x2, y2)
-        style_shape(shape, palette.database_fill, palette.database_border, line_weight_pt=1.5, rounding_in=0.1)
+        # 3D Database cylinder: body rectangle + top ellipse cap
+        h_rim = min(0.25, height * 0.16)
+        body = page.DrawRectangle(x1, y1, x2, y2 - h_rim)
+        style_shape(body, palette.database_fill, palette.database_border, line_weight_pt=1.5, rounding_in=0.1)
+        cap = page.DrawOval(x1, y2 - 2 * h_rim, x2, y2)
+        style_shape(cap, palette.database_fill, palette.database_border, line_weight_pt=1.5, rounding_in=0)
+        try:
+            sel = page.CreateSelection(1)
+            sel.Select(body, 2)
+            sel.Select(cap, 2)
+            shape = sel.Group()
+        except Exception:
+            shape = body
+
+    elif shape_type == ShapeType.ASYMMETRIC:
+        # Banner / flag shape with flat left edge and right-pointing apex
+        dx = width * 0.16
+        pts = [x1, y2, x2 - dx, y2, x2, cy, x2 - dx, y1, x1, y1, x1, y2]
+        shape = page.DrawPolyline(pts, 0)
+        style_shape(shape, palette.default_fill, palette.default_border, line_weight_pt=1.5, rounding_in=0)
 
     elif shape_type == ShapeType.HEXAGON:
         # 6-point Hexagon
@@ -198,9 +215,30 @@ def draw_node_shape(
         style_shape(shape, palette.default_fill, palette.default_border, line_weight_pt=1.5, rounding_in=0)
 
     elif shape_type == ShapeType.PARALLELOGRAM:
-        # Angled parallelogram
-        dx = width * 0.18
+        # Angled parallelogram [/text/] (top shifted left, bottom shifted right)
+        dx = width * 0.22
+        pts = [x1, y2, x2 - dx, y2, x2, y1, x1 + dx, y1, x1, y2]
+        shape = page.DrawPolyline(pts, 0)
+        style_shape(shape, palette.default_fill, palette.default_border, line_weight_pt=1.5, rounding_in=0)
+
+    elif shape_type == ShapeType.PARALLELOGRAM_ALT:
+        # Alternate angled parallelogram [\text\] (top shifted right, bottom shifted left)
+        dx = width * 0.22
         pts = [x1 + dx, y2, x2, y2, x2 - dx, y1, x1, y1, x1 + dx, y2]
+        shape = page.DrawPolyline(pts, 0)
+        style_shape(shape, palette.default_fill, palette.default_border, line_weight_pt=1.5, rounding_in=0)
+
+    elif shape_type == ShapeType.TRAPEZOID:
+        # Trapezoid [/text\] (top narrower than bottom)
+        dx = width * 0.18
+        pts = [x1 + dx, y2, x2 - dx, y2, x2, y1, x1, y1, x1 + dx, y2]
+        shape = page.DrawPolyline(pts, 0)
+        style_shape(shape, palette.default_fill, palette.default_border, line_weight_pt=1.5, rounding_in=0)
+
+    elif shape_type == ShapeType.TRAPEZOID_ALT:
+        # Inverted trapezoid [\text/] (bottom narrower than top)
+        dx = width * 0.18
+        pts = [x1, y2, x2, y2, x2 - dx, y1, x1 + dx, y1, x1, y2]
         shape = page.DrawPolyline(pts, 0)
         style_shape(shape, palette.default_fill, palette.default_border, line_weight_pt=1.5, rounding_in=0)
 
