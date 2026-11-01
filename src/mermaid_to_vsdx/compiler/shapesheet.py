@@ -3,6 +3,7 @@ Visio 2013+ ShapeSheet XML generator.
 Builds parametric 2D shapes, subgraph containers, 1D dynamic connectors, and <Connects> topologies.
 """
 
+from collections import defaultdict
 import html
 import re
 from typing import Dict, List, Optional, Tuple
@@ -26,7 +27,6 @@ def escape_xml(text: str) -> str:
     """Escapes string content for Visio XML elements."""
     if not text:
         return ""
-    # Visio XML text requires standard XML escaping
     return html.escape(text, quote=True).replace("\n", "\n")
 
 
@@ -70,8 +70,8 @@ def calculate_connector_endpoints_and_ports(
         return (
             round(src_x + src_w * 0.5, 4),
             round(src_y, 4),
-            round(src_x + src_w * 0.5 + 0.5, 4),
-            round(src_y + 0.5, 4),
+            round(src_x, 4),
+            round(src_y + src_h * 0.5, 4),
             "Right",
             "Top",
             103,
@@ -79,7 +79,34 @@ def calculate_connector_endpoints_and_ports(
         )
 
     if d in ("LR", "RL"):
-        # Horizontal layout
+        # If two shapes in an LR/RL diagram are stacked predominantly vertically
+        # (e.g. cross-subgraph connection between a bottom rail and top channel),
+        # use vertical ports (Top/Bottom) so connectors don't collide with horizontal flow.
+        vert_gap = abs(dy) - (src_h + dst_h) * 0.5
+        if vert_gap > 0.35 and abs(dy) > abs(dx) * 1.15:
+            if dy > 0:
+                return (
+                    round(src_x, 4),
+                    round(src_y + src_h * 0.5, 4),
+                    round(dst_x, 4),
+                    round(dst_y - dst_h * 0.5, 4),
+                    "Top",
+                    "Bottom",
+                    100,
+                    101,
+                )
+            else:
+                return (
+                    round(src_x, 4),
+                    round(src_y - src_h * 0.5, 4),
+                    round(dst_x, 4),
+                    round(dst_y + dst_h * 0.5, 4),
+                    "Bottom",
+                    "Top",
+                    101,
+                    100,
+                )
+
         if d == "LR":
             if dx > 0.1:
                 # Forward: Right of source -> Left of destination
@@ -181,7 +208,6 @@ def calculate_connector_endpoints_and_ports(
     elif d == "BT":
         # Bottom-to-Top vertical layout
         if dy > 0.1:
-            # Forward: Top of source -> Bottom of destination
             return (
                 round(src_x, 4),
                 round(src_y + src_h * 0.5, 4),
@@ -193,7 +219,6 @@ def calculate_connector_endpoints_and_ports(
                 101,
             )
         elif dy < -0.1:
-            # Feedback: Right -> Right
             return (
                 round(src_x + src_w * 0.5, 4),
                 round(src_y, 4),
@@ -300,21 +325,191 @@ def calculate_connector_endpoints(
     return bx, by, ex, ey
 
 
-def get_shape_geometry_xml(shape_type: str, width: float, height: float, rounding_in: float = 0.0) -> str:
+def distribute_shared_ports(
+    nodes_geom: Dict[str, Tuple[float, float, float, float]],
+    edge_pairs: List[Tuple[str, str]],
+    direction: str = "TD",
+    custom_ports: Optional[Dict[int, Tuple[float, float, float, float, str, str, int, int]]] = None,
+) -> Tuple[List[Tuple[float, float, float, float, str, str, int, int]], Dict[str, List[Tuple[str, float, float, str, str]]]]:
+    """
+    Computes (bx, by, ex, ey, src_port, dst_port, src_part, dst_part) for all edge_pairs
+    and distributes shared source/target ports across named connection points (e.g. Bottom_0, Top_in_0)
+    so multiple connectors on the same side of a node never overlap at their attachment points.
+    """
+    raw_routes: List[Dict] = []
+    src_port_groups: Dict[Tuple[str, str], List[int]] = defaultdict(list)
+    dst_port_groups: Dict[Tuple[str, str], List[int]] = defaultdict(list)
+
+    for idx, (src_id, dst_id) in enumerate(edge_pairs):
+        if src_id not in nodes_geom or dst_id not in nodes_geom:
+            raw_routes.append({
+                "bx": 0.0, "by": 0.0, "ex": 0.0, "ey": 0.0,
+                "src_port": "Bottom", "dst_port": "Top", "src_part": 101, "dst_part": 100,
+                "valid": False,
+            })
+            continue
+
+        sx, sy, sw, sh = nodes_geom[src_id]
+        dx, dy, dw, dh = nodes_geom[dst_id]
+
+        if custom_ports and idx in custom_ports:
+            bx, by, ex, ey, src_port, dst_port, src_part, dst_part = custom_ports[idx]
+        else:
+            bx, by, ex, ey, src_port, dst_port, src_part, dst_part = calculate_connector_endpoints_and_ports(
+                sx, sy, sw, sh, dx, dy, dw, dh, direction=direction
+            )
+            if src_port == "Right" and dst_port == "Right" and src_id != dst_id:
+                y_low, y_high = min(sy, dy) - 0.15, max(sy, dy) + 0.15
+                right_thresh = min(sx + sw * 0.5, dx + dw * 0.5) - 0.05
+                left_thresh = max(sx - sw * 0.5, dx - dw * 0.5) + 0.05
+                right_obs = sum(
+                    1 for oid, (ox, oy, ow, oh) in nodes_geom.items()
+                    if oid not in (src_id, dst_id)
+                    and not (oy + oh * 0.5 < y_low or oy - oh * 0.5 > y_high)
+                    and (ox + ow * 0.5 > right_thresh)
+                )
+                left_obs = sum(
+                    1 for oid, (ox, oy, ow, oh) in nodes_geom.items()
+                    if oid not in (src_id, dst_id)
+                    and not (oy + oh * 0.5 < y_low or oy - oh * 0.5 > y_high)
+                    and (ox - ow * 0.5 < left_thresh)
+                )
+                if right_obs > left_obs:
+                    bx = round(sx - sw * 0.5, 4)
+                    ex = round(dx - dw * 0.5, 4)
+                    src_port = "Left"
+                    dst_port = "Left"
+                    src_part = 102
+                    dst_part = 102
+
+        raw_routes.append({
+            "src_id": src_id, "dst_id": dst_id,
+            "sx": sx, "sy": sy, "sw": sw, "sh": sh,
+            "dx": dx, "dy": dy, "dw": dw, "dh": dh,
+            "bx": bx, "by": by, "ex": ex, "ey": ey,
+            "src_port": src_port, "dst_port": dst_port,
+            "src_part": src_part, "dst_part": dst_part,
+            "valid": True,
+        })
+        if src_id != dst_id:
+            src_port_groups[(src_id, src_port)].append(idx)
+            dst_port_groups[(dst_id, dst_port)].append(idx)
+
+    node_extra_connections: Dict[str, List[Tuple[str, float, float, str, str]]] = defaultdict(list)
+
+    # Distribute shared source ports
+    for (nid, base_port), indices in src_port_groups.items():
+        if len(indices) <= 1:
+            continue
+        sx, sy, sw, sh = nodes_geom[nid]
+        if base_port in ("Top", "Bottom"):
+            indices.sort(key=lambda i: (raw_routes[i]["dx"], -raw_routes[i]["dy"]))
+        else:
+            indices.sort(key=lambda i: (raw_routes[i]["dy"], raw_routes[i]["dx"]))
+
+        count = len(indices)
+        for rank_idx, edge_idx in enumerate(indices):
+            frac = round(0.22 + (0.56 * rank_idx / (count - 1)), 4)
+            cname = f"{base_port}_{rank_idx}"
+            info = raw_routes[edge_idx]
+            if base_port == "Bottom":
+                cx = round(sw * frac, 4)
+                cy = 0.0
+                node_extra_connections[nid].append((cname, cx, cy, f"Width*{frac}", "Height*0"))
+                info["bx"] = round(sx - sw * 0.5 + cx, 4)
+                info["by"] = round(sy - sh * 0.5, 4)
+            elif base_port == "Top":
+                cx = round(sw * frac, 4)
+                cy = round(sh, 4)
+                node_extra_connections[nid].append((cname, cx, cy, f"Width*{frac}", "Height*1"))
+                info["bx"] = round(sx - sw * 0.5 + cx, 4)
+                info["by"] = round(sy + sh * 0.5, 4)
+            elif base_port == "Left":
+                cx = 0.0
+                cy = round(sh * frac, 4)
+                node_extra_connections[nid].append((cname, cx, cy, "Width*0", f"Height*{frac}"))
+                info["bx"] = round(sx - sw * 0.5, 4)
+                info["by"] = round(sy - sh * 0.5 + cy, 4)
+            elif base_port == "Right":
+                cx = round(sw, 4)
+                cy = round(sh * frac, 4)
+                node_extra_connections[nid].append((cname, cx, cy, "Width*1", f"Height*{frac}"))
+                info["bx"] = round(sx + sw * 0.5, 4)
+                info["by"] = round(sy - sh * 0.5 + cy, 4)
+            info["src_port"] = cname
+
+    # Distribute shared destination ports
+    for (nid, base_port), indices in dst_port_groups.items():
+        if len(indices) <= 1:
+            continue
+        dx, dy, dw, dh = nodes_geom[nid]
+        if base_port in ("Top", "Bottom"):
+            indices.sort(key=lambda i: (raw_routes[i]["sx"], -raw_routes[i]["sy"]))
+        else:
+            indices.sort(key=lambda i: (raw_routes[i]["sy"], raw_routes[i]["sx"]))
+
+        count = len(indices)
+        for rank_idx, edge_idx in enumerate(indices):
+            frac = round(0.22 + (0.56 * rank_idx / (count - 1)), 4)
+            cname = f"{base_port}_in_{rank_idx}"
+            info = raw_routes[edge_idx]
+            if base_port == "Top":
+                cx = round(dw * frac, 4)
+                cy = round(dh, 4)
+                node_extra_connections[nid].append((cname, cx, cy, f"Width*{frac}", "Height*1"))
+                info["ex"] = round(dx - dw * 0.5 + cx, 4)
+                info["ey"] = round(dy + dh * 0.5, 4)
+            elif base_port == "Bottom":
+                cx = round(dw * frac, 4)
+                cy = 0.0
+                node_extra_connections[nid].append((cname, cx, cy, f"Width*{frac}", "Height*0"))
+                info["ex"] = round(dx - dw * 0.5 + cx, 4)
+                info["ey"] = round(dy - dh * 0.5, 4)
+            elif base_port == "Left":
+                cx = 0.0
+                cy = round(dh * frac, 4)
+                node_extra_connections[nid].append((cname, cx, cy, "Width*0", f"Height*{frac}"))
+                info["ex"] = round(dx - dw * 0.5, 4)
+                info["ey"] = round(dy - dh * 0.5 + cy, 4)
+            elif base_port == "Right":
+                cx = round(dw, 4)
+                cy = round(dh * frac, 4)
+                node_extra_connections[nid].append((cname, cx, cy, "Width*1", f"Height*{frac}"))
+                info["ex"] = round(dx + dw * 0.5, 4)
+                info["ey"] = round(dy - dh * 0.5 + cy, 4)
+            info["dst_port"] = cname
+
+    results = [
+        (r["bx"], r["by"], r["ex"], r["ey"], r["src_port"], r["dst_port"], r["src_part"], r["dst_part"])
+        for r in raw_routes
+    ]
+    return results, node_extra_connections
+
+
+def get_shape_geometry_xml(
+    shape_type: str,
+    width: float,
+    height: float,
+    rounding_in: float = 0.0,
+    no_fill: int = 0,
+    no_line: int = 0,
+) -> str:
     """
     Returns parametric ShapeSheet <Section N='Geometry' IX='0'> XML for 14 standard node primitives.
     All vertices compute evaluated numeric V values so shapes render immediately upon opening
     without requiring external stencils, and retain F formulas so they scale dynamically when resized.
     """
-    st = shape_type.lower()
+    st = shape_type.lower() if shape_type else "rectangle"
     w1 = round(width, 4)
     w05 = round(width * 0.5, 4)
     h1 = round(height, 4)
     h05 = round(height * 0.5, 4)
+    nf = 1 if no_fill else 0
+    nl = 1 if no_line else 0
 
     if st in ("diamond", "rhombus"):
         return f"""<Section N='Geometry' IX='0'>
-  <Cell N='NoFill' V='0'/><Cell N='NoLine' V='0'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
+  <Cell N='NoFill' V='{nf}'/><Cell N='NoLine' V='{nl}'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
   <Row T='MoveTo' IX='1'><Cell N='X' V='{w05}' F='Width*0.5'/><Cell N='Y' V='0' F='Height*0'/></Row>
   <Row T='LineTo' IX='2'><Cell N='X' V='{w1}' F='Width*1'/><Cell N='Y' V='{h05}' F='Height*0.5'/></Row>
   <Row T='LineTo' IX='3'><Cell N='X' V='{w05}' F='Width*0.5'/><Cell N='Y' V='{h1}' F='Height*1'/></Row>
@@ -324,7 +519,7 @@ def get_shape_geometry_xml(shape_type: str, width: float, height: float, roundin
 
     elif st in ("circle", "double_circle"):
         sec0 = f"""<Section N='Geometry' IX='0'>
-  <Cell N='NoFill' V='0'/><Cell N='NoLine' V='0'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
+  <Cell N='NoFill' V='{nf}'/><Cell N='NoLine' V='{nl}'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
   <Row T='Ellipse' IX='1'>
     <Cell N='X' V='{w05}' F='Width*0.5'/><Cell N='Y' V='{h05}' F='Height*0.5'/>
     <Cell N='A' V='{w1}' F='Width*1'/><Cell N='B' V='{h05}' F='Height*0.5'/>
@@ -332,14 +527,15 @@ def get_shape_geometry_xml(shape_type: str, width: float, height: float, roundin
   </Row>
 </Section>"""
         if st == "double_circle":
-            w08 = round(width * 0.8, 4)
-            h08 = round(height * 0.8, 4)
+            w012 = round(width * 0.10, 4)
+            w088 = round(width * 0.90, 4)
+            h088 = round(height * 0.90, 4)
             sec1 = f"""<Section N='Geometry' IX='1'>
-  <Cell N='NoFill' V='1'/><Cell N='NoLine' V='0'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
+  <Cell N='NoFill' V='1'/><Cell N='NoLine' V='{nl}'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
   <Row T='Ellipse' IX='1'>
     <Cell N='X' V='{w05}' F='Width*0.5'/><Cell N='Y' V='{h05}' F='Height*0.5'/>
-    <Cell N='A' V='{w08}' F='Width*0.8'/><Cell N='B' V='{h05}' F='Height*0.5'/>
-    <Cell N='C' V='{w05}' F='Width*0.5'/><Cell N='D' V='{h08}' F='Height*0.8'/>
+    <Cell N='A' V='{w088}' F='Width*0.9'/><Cell N='B' V='{h05}' F='Height*0.5'/>
+    <Cell N='C' V='{w05}' F='Width*0.5'/><Cell N='D' V='{h088}' F='Height*0.9'/>
   </Row>
 </Section>"""
             return sec0 + "\n" + sec1
@@ -352,10 +548,10 @@ def get_shape_geometry_xml(shape_type: str, width: float, height: float, roundin
         h_top_lower = round(height * 0.72, 4)
         h_bot_curve = round(height * 0.0, 4)
         w05 = round(width * 0.5, 4)
-        d_val = round((height * 0.14) / max(0.001, (width * 0.5)), 4)
-        d_formula = "(Height*0.14)/(Width*0.5)"
+        d_val = round((width * 0.5) / max(0.001, (height * 0.14)), 4)
+        d_formula = "(Width*0.5)/(Height*0.14)"
         return f"""<Section N='Geometry' IX='0'>
-  <Cell N='NoFill' V='0'/><Cell N='NoLine' V='0'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
+  <Cell N='NoFill' V='{nf}'/><Cell N='NoLine' V='{nl}'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
   <Row T='MoveTo' IX='1'><Cell N='X' V='0' F='Width*0'/><Cell N='Y' V='{h_base}' F='Height*0.14'/></Row>
   <Row T='LineTo' IX='2'><Cell N='X' V='0' F='Width*0'/><Cell N='Y' V='{h_top}' F='Height*0.86'/></Row>
   <Row T='EllipticalArcTo' IX='3'>
@@ -371,7 +567,7 @@ def get_shape_geometry_xml(shape_type: str, width: float, height: float, roundin
   </Row>
 </Section>
 <Section N='Geometry' IX='1'>
-  <Cell N='NoFill' V='1'/><Cell N='NoLine' V='0'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
+  <Cell N='NoFill' V='1'/><Cell N='NoLine' V='{nl}'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
   <Row T='MoveTo' IX='1'><Cell N='X' V='0' F='Width*0'/><Cell N='Y' V='{h_top}' F='Height*0.86'/></Row>
   <Row T='EllipticalArcTo' IX='2'>
     <Cell N='X' V='{w1}' F='Width*1'/><Cell N='Y' V='{h_top}' F='Height*0.86'/>
@@ -384,7 +580,7 @@ def get_shape_geometry_xml(shape_type: str, width: float, height: float, roundin
         w01 = round(width * 0.1, 4)
         w09 = round(width * 0.9, 4)
         return f"""<Section N='Geometry' IX='0'>
-  <Cell N='NoFill' V='0'/><Cell N='NoLine' V='0'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
+  <Cell N='NoFill' V='{nf}'/><Cell N='NoLine' V='{nl}'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
   <Row T='MoveTo' IX='1'><Cell N='X' V='0' F='Width*0'/><Cell N='Y' V='0' F='Height*0'/></Row>
   <Row T='LineTo' IX='2'><Cell N='X' V='{w1}' F='Width*1'/><Cell N='Y' V='0' F='Height*0'/></Row>
   <Row T='LineTo' IX='3'><Cell N='X' V='{w1}' F='Width*1'/><Cell N='Y' V='{h1}' F='Height*1'/></Row>
@@ -392,12 +588,12 @@ def get_shape_geometry_xml(shape_type: str, width: float, height: float, roundin
   <Row T='LineTo' IX='5'><Cell N='X' V='0' F='Geometry1.X1'/><Cell N='Y' V='0' F='Geometry1.Y1'/></Row>
 </Section>
 <Section N='Geometry' IX='1'>
-  <Cell N='NoFill' V='1'/><Cell N='NoLine' V='0'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
+  <Cell N='NoFill' V='1'/><Cell N='NoLine' V='{nl}'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
   <Row T='MoveTo' IX='1'><Cell N='X' V='{w01}' F='Width*0.1'/><Cell N='Y' V='0' F='Height*0'/></Row>
   <Row T='LineTo' IX='2'><Cell N='X' V='{w01}' F='Width*0.1'/><Cell N='Y' V='{h1}' F='Height*1'/></Row>
 </Section>
 <Section N='Geometry' IX='2'>
-  <Cell N='NoFill' V='1'/><Cell N='NoLine' V='0'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
+  <Cell N='NoFill' V='1'/><Cell N='NoLine' V='{nl}'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
   <Row T='MoveTo' IX='1'><Cell N='X' V='{w09}' F='Width*0.9'/><Cell N='Y' V='0' F='Height*0'/></Row>
   <Row T='LineTo' IX='2'><Cell N='X' V='{w09}' F='Width*0.9'/><Cell N='Y' V='{h1}' F='Height*1'/></Row>
 </Section>"""
@@ -406,7 +602,7 @@ def get_shape_geometry_xml(shape_type: str, width: float, height: float, roundin
         w02 = round(width * 0.2, 4)
         w08 = round(width * 0.8, 4)
         return f"""<Section N='Geometry' IX='0'>
-  <Cell N='NoFill' V='0'/><Cell N='NoLine' V='0'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
+  <Cell N='NoFill' V='{nf}'/><Cell N='NoLine' V='{nl}'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
   <Row T='MoveTo' IX='1'><Cell N='X' V='{w02}' F='Width*0.2'/><Cell N='Y' V='0' F='Height*0'/></Row>
   <Row T='LineTo' IX='2'><Cell N='X' V='{w08}' F='Width*0.8'/><Cell N='Y' V='0' F='Height*0'/></Row>
   <Row T='LineTo' IX='3'><Cell N='X' V='{w1}' F='Width*1'/><Cell N='Y' V='{h05}' F='Height*0.5'/></Row>
@@ -420,7 +616,7 @@ def get_shape_geometry_xml(shape_type: str, width: float, height: float, roundin
         w022 = round(width * 0.22, 4)
         w078 = round(width * 0.78, 4)
         return f"""<Section N='Geometry' IX='0'>
-  <Cell N='NoFill' V='0'/><Cell N='NoLine' V='0'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
+  <Cell N='NoFill' V='{nf}'/><Cell N='NoLine' V='{nl}'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
   <Row T='MoveTo' IX='1'><Cell N='X' V='{w022}' F='Width*0.22'/><Cell N='Y' V='0' F='Height*0'/></Row>
   <Row T='LineTo' IX='2'><Cell N='X' V='{w1}' F='Width*1'/><Cell N='Y' V='0' F='Height*0'/></Row>
   <Row T='LineTo' IX='3'><Cell N='X' V='{w078}' F='Width*0.78'/><Cell N='Y' V='{h1}' F='Height*1'/></Row>
@@ -432,7 +628,7 @@ def get_shape_geometry_xml(shape_type: str, width: float, height: float, roundin
         w022 = round(width * 0.22, 4)
         w078 = round(width * 0.78, 4)
         return f"""<Section N='Geometry' IX='0'>
-  <Cell N='NoFill' V='0'/><Cell N='NoLine' V='0'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
+  <Cell N='NoFill' V='{nf}'/><Cell N='NoLine' V='{nl}'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
   <Row T='MoveTo' IX='1'><Cell N='X' V='0' F='Width*0'/><Cell N='Y' V='0' F='Height*0'/></Row>
   <Row T='LineTo' IX='2'><Cell N='X' V='{w078}' F='Width*0.78'/><Cell N='Y' V='0' F='Height*0'/></Row>
   <Row T='LineTo' IX='3'><Cell N='X' V='{w1}' F='Width*1'/><Cell N='Y' V='{h1}' F='Height*1'/></Row>
@@ -444,7 +640,7 @@ def get_shape_geometry_xml(shape_type: str, width: float, height: float, roundin
         w02 = round(width * 0.2, 4)
         w08 = round(width * 0.8, 4)
         return f"""<Section N='Geometry' IX='0'>
-  <Cell N='NoFill' V='0'/><Cell N='NoLine' V='0'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
+  <Cell N='NoFill' V='{nf}'/><Cell N='NoLine' V='{nl}'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
   <Row T='MoveTo' IX='1'><Cell N='X' V='0' F='Width*0'/><Cell N='Y' V='0' F='Height*0'/></Row>
   <Row T='LineTo' IX='2'><Cell N='X' V='{w1}' F='Width*1'/><Cell N='Y' V='0' F='Height*0'/></Row>
   <Row T='LineTo' IX='3'><Cell N='X' V='{w08}' F='Width*0.8'/><Cell N='Y' V='{h1}' F='Height*1'/></Row>
@@ -456,7 +652,7 @@ def get_shape_geometry_xml(shape_type: str, width: float, height: float, roundin
         w02 = round(width * 0.2, 4)
         w08 = round(width * 0.8, 4)
         return f"""<Section N='Geometry' IX='0'>
-  <Cell N='NoFill' V='0'/><Cell N='NoLine' V='0'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
+  <Cell N='NoFill' V='{nf}'/><Cell N='NoLine' V='{nl}'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
   <Row T='MoveTo' IX='1'><Cell N='X' V='{w02}' F='Width*0.2'/><Cell N='Y' V='0' F='Height*0'/></Row>
   <Row T='LineTo' IX='2'><Cell N='X' V='{w08}' F='Width*0.8'/><Cell N='Y' V='0' F='Height*0'/></Row>
   <Row T='LineTo' IX='3'><Cell N='X' V='{w1}' F='Width*1'/><Cell N='Y' V='{h1}' F='Height*1'/></Row>
@@ -467,7 +663,7 @@ def get_shape_geometry_xml(shape_type: str, width: float, height: float, roundin
     elif st in ("asymmetric",):
         w085 = round(width * 0.85, 4)
         return f"""<Section N='Geometry' IX='0'>
-  <Cell N='NoFill' V='0'/><Cell N='NoLine' V='0'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
+  <Cell N='NoFill' V='{nf}'/><Cell N='NoLine' V='{nl}'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
   <Row T='MoveTo' IX='1'><Cell N='X' V='0' F='Width*0'/><Cell N='Y' V='0' F='Height*0'/></Row>
   <Row T='LineTo' IX='2'><Cell N='X' V='{w085}' F='Width*0.85'/><Cell N='Y' V='0' F='Height*0'/></Row>
   <Row T='LineTo' IX='3'><Cell N='X' V='{w1}' F='Width*1'/><Cell N='Y' V='{h05}' F='Height*0.5'/></Row>
@@ -478,7 +674,7 @@ def get_shape_geometry_xml(shape_type: str, width: float, height: float, roundin
 
     # Default: Rectangle / Rounded / Stadium
     return f"""<Section N='Geometry' IX='0'>
-  <Cell N='NoFill' V='0'/><Cell N='NoLine' V='0'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
+  <Cell N='NoFill' V='{nf}'/><Cell N='NoLine' V='{nl}'/><Cell N='NoShow' V='0'/><Cell N='NoSnap' V='0'/>
   <Row T='MoveTo' IX='1'><Cell N='X' V='0' F='Width*0'/><Cell N='Y' V='0' F='Height*0'/></Row>
   <Row T='LineTo' IX='2'><Cell N='X' V='{w1}' F='Width*1'/><Cell N='Y' V='0' F='Height*0'/></Row>
   <Row T='LineTo' IX='3'><Cell N='X' V='{w1}' F='Width*1'/><Cell N='Y' V='{h1}' F='Height*1'/></Row>
@@ -510,18 +706,28 @@ def build_2d_shape_xml(
     is_container: bool = False,
     has_connections: bool = True,
     extra_connections: Optional[List[Tuple[str, float, float, str, str]]] = None,
+    shadow: bool = False,
 ) -> str:
     """
     Renders a complete Visio 2D <Shape> XML element with parametric ShapeSheet cells.
     """
     escaped_text = escape_xml(text)
     horz_align = 0 if align_left else 1
-    ind_first = 0.1 if align_left else 0.0
+    left_margin = 0.12 if align_left else 0.06
+    right_margin = 0.08 if align_left else 0.06
 
     fill_hex = rgb_to_hex(fill_color)
     line_hex = rgb_to_hex(line_color)
     text_hex = rgb_to_hex(text_color)
     st = shape_type.lower() if shape_type else "rectangle"
+
+    # Default rounding for rounded and stadium shapes if rounding_in was left at 0.0
+    if rounding_in <= 0.0:
+        if st == "stadium":
+            rounding_in = round(height * 0.5, 4)
+        elif st == "rounded":
+            rounding_in = 0.16
+
     txt_px = str(round(width * 0.44, 4)) if st in ("asymmetric",) else str(round(width * 0.5, 4))
     txt_px_f = "Width*0.44" if st in ("asymmetric",) else "Width*0.5"
     txt_py = str(round(height * 0.48, 4)) if st in ("cylinder", "database") else str(round(height * 0.5, 4))
@@ -542,6 +748,11 @@ def build_2d_shape_xml(
         build_cell("LineColor", line_hex),
         build_cell("LinePattern", str(line_pattern), f"GUARD({line_pattern})" if line_pattern != 1 else None),
         build_cell("Rounding", str(rounding_in), unit="IN"),
+        build_cell("VerticalAlign", "1"),
+        build_cell("LeftMargin", str(left_margin), unit="IN"),
+        build_cell("RightMargin", str(right_margin), unit="IN"),
+        build_cell("TopMargin", "0.04", unit="IN"),
+        build_cell("BottomMargin", "0.04", unit="IN"),
         build_cell("TextBkgnd", "0"),
         build_cell("TxtWidth", str(width), "Width*1"),
         build_cell("TxtHeight", str(height), "Height*1"),
@@ -552,6 +763,18 @@ def build_2d_shape_xml(
         build_cell("TxtAngle", "0"),
         build_cell("ObjType", "1"),
     ]
+
+    if shadow and fill_pattern != 0 and not is_container:
+        cells.extend([
+            build_cell("ShdwPattern", "1"),
+            build_cell("ShdwForegnd", "#94a3b8"),
+            build_cell("ShdwForegndTrans", "0.72"),
+            build_cell("ShapeShdwType", "1"),
+            build_cell("ShapeShdwOffsetX", "0.025", unit="IN"),
+            build_cell("ShapeShdwOffsetY", "-0.025", unit="IN"),
+            build_cell("ShapeShdwBlur", "0.04", unit="IN"),
+            build_cell("ShapeShdwShow", "1"),
+        ])
 
     user_section = ""
     if is_container:
@@ -566,9 +789,10 @@ def build_2d_shape_xml(
 </Row></Section>"""
 
     para_section = f"""<Section N='Paragraph'><Row IX='0'>
-  <Cell N='IndFirst' V='{ind_first}' U='IN'/>
+  <Cell N='IndFirst' V='0' U='IN'/>
   <Cell N='IndLeft' V='0' U='IN'/>
   <Cell N='IndRight' V='0' U='IN'/>
+  <Cell N='SpLine' V='-1.2' U='DT'/>
   <Cell N='HorzAlign' V='{horz_align}'/>
 </Row></Section>"""
 
@@ -579,22 +803,29 @@ def build_2d_shape_xml(
         h_rnd = round(height, 4)
         h05_rnd = round(height * 0.5, 4)
         conn_rows = [
-            f"<Row T='Connection' N='Top'><Cell N='X' V='{w05_rnd}' F='Width*0.5'/><Cell N='Y' V='{h_rnd}' F='Height*1'/><Cell N='DirX' V='0'/><Cell N='DirY' V='0'/><Cell N='Type' V='0'/><Cell N='AutoGen' V='0'/><Cell N='Prompt' V='' F='No Formula'/></Row>",
-            f"<Row T='Connection' N='Bottom'><Cell N='X' V='{w05_rnd}' F='Width*0.5'/><Cell N='Y' V='0' F='Height*0'/><Cell N='DirX' V='0'/><Cell N='DirY' V='0'/><Cell N='Type' V='0'/><Cell N='AutoGen' V='0'/><Cell N='Prompt' V='' F='No Formula'/></Row>",
-            f"<Row T='Connection' N='Left'><Cell N='X' V='0' F='Width*0'/><Cell N='Y' V='{h05_rnd}' F='Height*0.5'/><Cell N='DirX' V='0'/><Cell N='DirY' V='0'/><Cell N='Type' V='0'/><Cell N='AutoGen' V='0'/><Cell N='Prompt' V='' F='No Formula'/></Row>",
-            f"<Row T='Connection' N='Right'><Cell N='X' V='{w_rnd}' F='Width*1'/><Cell N='Y' V='{h05_rnd}' F='Height*0.5'/><Cell N='DirX' V='0'/><Cell N='DirY' V='0'/><Cell N='Type' V='0'/><Cell N='AutoGen' V='0'/><Cell N='Prompt' V='' F='No Formula'/></Row>",
+            f"<Row T='Connection' N='Top'><Cell N='X' V='{w05_rnd}' F='Width*0.5'/><Cell N='Y' V='{h_rnd}' F='Height*1'/><Cell N='DirX' V='0'/><Cell N='DirY' V='-1'/><Cell N='Type' V='0'/><Cell N='AutoGen' V='0'/><Cell N='Prompt' V='' F='No Formula'/></Row>",
+            f"<Row T='Connection' N='Bottom'><Cell N='X' V='{w05_rnd}' F='Width*0.5'/><Cell N='Y' V='0' F='Height*0'/><Cell N='DirX' V='0'/><Cell N='DirY' V='1'/><Cell N='Type' V='0'/><Cell N='AutoGen' V='0'/><Cell N='Prompt' V='' F='No Formula'/></Row>",
+            f"<Row T='Connection' N='Left'><Cell N='X' V='0' F='Width*0'/><Cell N='Y' V='{h05_rnd}' F='Height*0.5'/><Cell N='DirX' V='1'/><Cell N='DirY' V='0'/><Cell N='Type' V='0'/><Cell N='AutoGen' V='0'/><Cell N='Prompt' V='' F='No Formula'/></Row>",
+            f"<Row T='Connection' N='Right'><Cell N='X' V='{w_rnd}' F='Width*1'/><Cell N='Y' V='{h05_rnd}' F='Height*0.5'/><Cell N='DirX' V='-1'/><Cell N='DirY' V='0'/><Cell N='Type' V='0'/><Cell N='AutoGen' V='0'/><Cell N='Prompt' V='' F='No Formula'/></Row>",
         ]
         if extra_connections:
             for c_name, c_x, c_y, c_xf, c_yf in extra_connections:
+                c_base = c_name.split("_")[0]
+                dir_x = "1" if c_base == "Left" else ("-1" if c_base == "Right" else "0")
+                dir_y = "-1" if c_base == "Top" else ("1" if c_base == "Bottom" else "0")
                 conn_rows.append(
-                    f"<Row T='Connection' N='{c_name}'><Cell N='X' V='{round(c_x, 4)}' F='{c_xf}'/><Cell N='Y' V='{round(c_y, 4)}' F='{c_yf}'/><Cell N='DirX' V='0'/><Cell N='DirY' V='0'/><Cell N='Type' V='0'/><Cell N='AutoGen' V='0'/><Cell N='Prompt' V='' F='No Formula'/></Row>"
+                    f"<Row T='Connection' N='{c_name}'><Cell N='X' V='{round(c_x, 4)}' F='{c_xf}'/><Cell N='Y' V='{round(c_y, 4)}' F='{c_yf}'/><Cell N='DirX' V='{dir_x}'/><Cell N='DirY' V='{dir_y}'/><Cell N='Type' V='0'/><Cell N='AutoGen' V='0'/><Cell N='Prompt' V='' F='No Formula'/></Row>"
                 )
         conn_rows_str = "\n  ".join(conn_rows)
         conn_section = f"""<Section N='Connection'>
   {conn_rows_str}
 </Section>"""
 
-    geom_section = get_shape_geometry_xml(shape_type, width, height, rounding_in)
+    no_fill_flag = 1 if fill_pattern == 0 else 0
+    no_line_flag = 1 if line_pattern == 0 else 0
+    geom_section = get_shape_geometry_xml(
+        shape_type, width, height, rounding_in, no_fill=no_fill_flag, no_line=no_line_flag
+    )
 
     text_element = f"<Text><cp IX='0'/><pp IX='0'/>{escaped_text}</Text>" if text else ""
 
@@ -651,15 +882,18 @@ def build_group_shape_xml(
     conn_section = ""
     if has_connections:
         conn_rows = [
-            f"<Row T='Connection' N='Top'><Cell N='X' V='{w05_rnd}' F='Width*0.5'/><Cell N='Y' V='{h_rnd}' F='Height*1'/><Cell N='DirX' V='0'/><Cell N='DirY' V='0'/><Cell N='Type' V='0'/><Cell N='AutoGen' V='0'/><Cell N='Prompt' V='' F='No Formula'/></Row>",
-            f"<Row T='Connection' N='Bottom'><Cell N='X' V='{w05_rnd}' F='Width*0.5'/><Cell N='Y' V='0' F='Height*0'/><Cell N='DirX' V='0'/><Cell N='DirY' V='0'/><Cell N='Type' V='0'/><Cell N='AutoGen' V='0'/><Cell N='Prompt' V='' F='No Formula'/></Row>",
-            f"<Row T='Connection' N='Left'><Cell N='X' V='0' F='Width*0'/><Cell N='Y' V='{h05_rnd}' F='Height*0.5'/><Cell N='DirX' V='0'/><Cell N='DirY' V='0'/><Cell N='Type' V='0'/><Cell N='AutoGen' V='0'/><Cell N='Prompt' V='' F='No Formula'/></Row>",
-            f"<Row T='Connection' N='Right'><Cell N='X' V='{w_rnd}' F='Width*1'/><Cell N='Y' V='{h05_rnd}' F='Height*0.5'/><Cell N='DirX' V='0'/><Cell N='DirY' V='0'/><Cell N='Type' V='0'/><Cell N='AutoGen' V='0'/><Cell N='Prompt' V='' F='No Formula'/></Row>",
+            f"<Row T='Connection' N='Top'><Cell N='X' V='{w05_rnd}' F='Width*0.5'/><Cell N='Y' V='{h_rnd}' F='Height*1'/><Cell N='DirX' V='0'/><Cell N='DirY' V='-1'/><Cell N='Type' V='0'/><Cell N='AutoGen' V='0'/><Cell N='Prompt' V='' F='No Formula'/></Row>",
+            f"<Row T='Connection' N='Bottom'><Cell N='X' V='{w05_rnd}' F='Width*0.5'/><Cell N='Y' V='0' F='Height*0'/><Cell N='DirX' V='0'/><Cell N='DirY' V='1'/><Cell N='Type' V='0'/><Cell N='AutoGen' V='0'/><Cell N='Prompt' V='' F='No Formula'/></Row>",
+            f"<Row T='Connection' N='Left'><Cell N='X' V='0' F='Width*0'/><Cell N='Y' V='{h05_rnd}' F='Height*0.5'/><Cell N='DirX' V='1'/><Cell N='DirY' V='0'/><Cell N='Type' V='0'/><Cell N='AutoGen' V='0'/><Cell N='Prompt' V='' F='No Formula'/></Row>",
+            f"<Row T='Connection' N='Right'><Cell N='X' V='{w_rnd}' F='Width*1'/><Cell N='Y' V='{h05_rnd}' F='Height*0.5'/><Cell N='DirX' V='-1'/><Cell N='DirY' V='0'/><Cell N='Type' V='0'/><Cell N='AutoGen' V='0'/><Cell N='Prompt' V='' F='No Formula'/></Row>",
         ]
         if extra_connections:
             for c_name, c_x, c_y, c_xf, c_yf in extra_connections:
+                c_base = c_name.split("_")[0]
+                dir_x = "1" if c_base == "Left" else ("-1" if c_base == "Right" else "0")
+                dir_y = "-1" if c_base == "Top" else ("1" if c_base == "Bottom" else "0")
                 conn_rows.append(
-                    f"<Row T='Connection' N='{c_name}'><Cell N='X' V='{round(c_x, 4)}' F='{c_xf}'/><Cell N='Y' V='{round(c_y, 4)}' F='{c_yf}'/><Cell N='DirX' V='0'/><Cell N='DirY' V='0'/><Cell N='Type' V='0'/><Cell N='AutoGen' V='0'/><Cell N='Prompt' V='' F='No Formula'/></Row>"
+                    f"<Row T='Connection' N='{c_name}'><Cell N='X' V='{round(c_x, 4)}' F='{c_xf}'/><Cell N='Y' V='{round(c_y, 4)}' F='{c_yf}'/><Cell N='DirX' V='{dir_x}'/><Cell N='DirY' V='{dir_y}'/><Cell N='Type' V='0'/><Cell N='AutoGen' V='0'/><Cell N='Prompt' V='' F='No Formula'/></Row>"
                 )
         conn_rows_str = "\n  ".join(conn_rows)
         conn_section = f"""<Section N='Connection'>
@@ -701,6 +935,7 @@ def build_1d_connector_xml(
     dst_port: Optional[str] = None,
     routing_direction: Optional[str] = None,
     intermediate_waypoints: Optional[List[Tuple[float, float]]] = None,
+    u_channel_offset: float = 0.55,
 ) -> str:
     """
     Renders a Visio 1D Connector <Shape> XML element.
@@ -755,7 +990,7 @@ def build_1d_connector_xml(
             build_cell("ShapeRouteStyle", "1"),
             build_cell("RouteStyle", "1"),
             build_cell("ConLineRouteExt", "1"),
-            build_cell("ConFixedCode", "1"),
+            build_cell("ConFixedCode", "6"),
             build_cell("PinX", str(pin_x), "GUARD((BeginX+EndX)/2)"),
             build_cell("PinY", str(pin_y), "GUARD((BeginY+EndY)/2)"),
             build_cell("Width", str(round(w, 4)), "GUARD(ABS(EndX-BeginX))"),
@@ -783,41 +1018,325 @@ def build_1d_connector_xml(
                 build_cell("ShapeRouteStyle", "1"),
                 build_cell("RouteStyle", "1"),
                 build_cell("ConLineRouteExt", "1"),
-                build_cell("ConFixedCode", "1"),
+                build_cell("ConFixedCode", "6"),
                 build_cell("GlueType", "2"),
                 build_cell("WalkPreference", "1"),
             ])
 
-    # Position label text offset from line
-    if is_dynamic:
-        if w < 0.1:  # Predominantly vertical line
-            txt_px = str(round(w * 0.5 + 0.35, 4))
+    base_src = (src_port or "").split("_")[0]
+    base_dst = (dst_port or "").split("_")[0]
+
+    # Local 1D shape coordinate system: origin (0, 0) corresponds to (min(begin_x, end_x), min(begin_y, end_y))
+    origin_x = min(begin_x, end_x)
+    origin_y = min(begin_y, end_y)
+    x_begin = 0.0 if dx >= 0 else round(w, 4)
+    y_begin = 0.0 if dy >= 0 else round(h, 4)
+    x_end = round(w, 4) if dx >= 0 else 0.0
+    y_end = round(h, 4) if dy >= 0 else 0.0
+
+    # Default text block anchoring (centered at TxtPinX, TxtPinY)
+    txt_loc_px = "0.8"
+    txt_loc_px_f = "TxtWidth*0.5"
+    horz_align = "1"
+    txt_px = str(round(w * 0.5, 4))
+    txt_py = str(round(h * 0.5 + 0.16, 4))
+    txt_px_f = "Width*0.5"
+    txt_py_f = "Height*0.5+0.16"
+
+    # Compute orthogonal geometry and matching label anchor
+    if is_dynamic and source_shape_id is not None and source_shape_id == target_shape_id:
+        # Self-loop on a 2D shape (Right -> Top exterior loop)
+        u_x = round(x_begin + 0.45, 4)
+        u_y = round(y_end + 0.40, 4)
+        points = [
+            ("MoveTo", x_begin, y_begin),
+            ("LineTo", u_x, y_begin),
+            ("LineTo", u_x, u_y),
+            ("LineTo", x_end, u_y),
+            ("LineTo", x_end, y_end),
+        ]
+        txt_px = str(round(u_x + 0.10, 4))
+        txt_py = str(round(u_y + 0.12, 4))
+        txt_px_f = f"Width+{round(0.45 + 0.10, 4)}"
+        txt_py_f = f"Height+{round(0.40 + 0.12, 4)}"
+    elif is_dynamic and base_src and base_src == base_dst:
+        # Same-side U-channel feedback loop (Right->Right, Left->Left, Bottom->Bottom, Top->Top)
+        u_off = max(0.45, u_channel_offset)
+        if base_src == "Right":
+            u_x = round(w + u_off, 4)
+            points = [
+                ("MoveTo", x_begin, y_begin),
+                ("LineTo", u_x, y_begin),
+                ("LineTo", u_x, y_end),
+                ("LineTo", x_end, y_end),
+            ]
+            txt_loc_px = "0"
+            txt_loc_px_f = "TxtWidth*0"
+            horz_align = "0"
+            txt_px = str(round(u_x + 0.08, 4))
             txt_py = str(round(h * 0.5, 4))
-            txt_px_f = "Width*0.5+24 pt"
+            txt_px_f = f"Width+{round(u_off + 0.08, 4)}"
             txt_py_f = "Height*0.5"
-        elif h < 0.1:  # Predominantly horizontal line
+        elif base_src == "Left":
+            u_x = round(-u_off, 4)
+            points = [
+                ("MoveTo", x_begin, y_begin),
+                ("LineTo", u_x, y_begin),
+                ("LineTo", u_x, y_end),
+                ("LineTo", x_end, y_end),
+            ]
+            txt_loc_px = "1.6"
+            txt_loc_px_f = "TxtWidth*1"
+            horz_align = "2"
+            txt_px = str(round(u_x - 0.08, 4))
+            txt_py = str(round(h * 0.5, 4))
+            txt_px_f = f"-{round(u_off + 0.08, 4)}"
+            txt_py_f = "Height*0.5"
+        elif base_src == "Bottom":
+            u_y = round(-u_off, 4)
+            points = [
+                ("MoveTo", x_begin, y_begin),
+                ("LineTo", x_begin, u_y),
+                ("LineTo", x_end, u_y),
+                ("LineTo", x_end, y_end),
+            ]
             txt_px = str(round(w * 0.5, 4))
-            txt_py = str(round(h * 0.5 + 0.22, 4))
+            txt_py = str(round(u_y - 0.16, 4))
             txt_px_f = "Width*0.5"
-            txt_py_f = "Height*0.5+16 pt"
+            txt_py_f = f"-{round(u_off + 0.16, 4)}"
+        else:  # Top -> Top
+            u_y = round(h + u_off, 4)
+            points = [
+                ("MoveTo", x_begin, y_begin),
+                ("LineTo", x_begin, u_y),
+                ("LineTo", x_end, u_y),
+                ("LineTo", x_end, y_end),
+            ]
+            txt_px = str(round(w * 0.5, 4))
+            txt_py = str(round(u_y + 0.16, 4))
+            txt_px_f = "Width*0.5"
+            txt_py_f = f"Height+{round(u_off + 0.16, 4)}"
+    elif intermediate_waypoints:
+        # Clean orthogonal routing through intermediate dummy waypoints
+        points = [("MoveTo", x_begin, y_begin)]
+        cur_x, cur_y = x_begin, y_begin
+        is_horiz_flow = (routing_direction or "TD").upper() in ("LR", "RL")
+
+        for idx_wp, (wx, wy) in enumerate(intermediate_waypoints):
+            lx = round(wx - origin_x, 4)
+            ly = round(wy - origin_y, 4)
+            if not is_horiz_flow:
+                if base_src == "Left":
+                    lx = round(min(lx, x_begin - 0.35), 4)
+                elif base_src == "Right":
+                    lx = round(max(lx, x_begin + 0.35), 4)
+            else:
+                if base_src == "Bottom":
+                    ly = round(min(ly, y_begin - 0.35), 4)
+                elif base_src == "Top":
+                    ly = round(max(ly, y_begin + 0.35), 4)
+
+            if is_horiz_flow:
+                if idx_wp == 0 and base_src in ("Top", "Bottom"):
+                    points.append(("LineTo", cur_x, ly))
+                    points.append(("LineTo", lx, ly))
+                else:
+                    if abs(ly - cur_y) > 0.02:
+                        stub_x = round(cur_x + (0.35 if lx >= cur_x else -0.35), 4) if idx_wp == 0 else round((cur_x + lx) * 0.5, 4)
+                        points.append(("LineTo", stub_x, cur_y))
+                        points.append(("LineTo", stub_x, ly))
+                    points.append(("LineTo", lx, ly))
+            else:
+                if idx_wp == 0 and base_src in ("Left", "Right"):
+                    points.append(("LineTo", lx, cur_y))
+                    points.append(("LineTo", lx, ly))
+                else:
+                    if abs(lx - cur_x) > 0.02:
+                        stub_y = round(cur_y + (-0.35 if ly <= cur_y else 0.35), 4) if idx_wp == 0 else round((cur_y + ly) * 0.5, 4)
+                        points.append(("LineTo", cur_x, stub_y))
+                        points.append(("LineTo", lx, stub_y))
+                    points.append(("LineTo", lx, ly))
+            cur_x, cur_y = lx, ly
+
+        # Orthogonal final approach into target port so arrowhead points straight into the port
+        if base_dst in ("Top", "Bottom") or (not base_dst and not is_horiz_flow):
+            if abs(x_end - cur_x) > 0.02:
+                if base_dst == "Top" or cur_y > y_end:
+                    app_y = round(min(cur_y - 0.1, y_end + 0.32), 4) if cur_y - y_end > 0.45 else round((cur_y + y_end) * 0.5, 4)
+                else:
+                    app_y = round(max(cur_y + 0.1, y_end - 0.32), 4) if y_end - cur_y > 0.45 else round((cur_y + y_end) * 0.5, 4)
+                points.append(("LineTo", cur_x, app_y))
+                points.append(("LineTo", x_end, app_y))
+            points.append(("LineTo", x_end, y_end))
         else:
-            txt_px = str(round(w * 0.5 + 0.2, 4))
-            txt_py = str(round(h * 0.5 + 0.18, 4))
-            txt_px_f = "Width*0.5+14 pt"
-            txt_py_f = "Height*0.5+13 pt"
-    else:
+            if abs(y_end - cur_y) > 0.02:
+                if base_dst == "Left" or cur_x < x_end:
+                    app_x = round(max(cur_x + 0.1, x_end - 0.32), 4) if x_end - cur_x > 0.45 else round((cur_x + x_end) * 0.5, 4)
+                else:
+                    app_x = round(min(cur_x - 0.1, x_end + 0.32), 4) if cur_x - x_end > 0.45 else round((cur_x + x_end) * 0.5, 4)
+                points.append(("LineTo", app_x, cur_y))
+                points.append(("LineTo", app_x, y_end))
+            points.append(("LineTo", x_end, y_end))
+
+        # Simplify collinear/duplicate consecutive vertices
+        simplified_pts = [points[0]]
+        for pt in points[1:]:
+            if abs(pt[1] - simplified_pts[-1][1]) < 1e-4 and abs(pt[2] - simplified_pts[-1][2]) < 1e-4:
+                continue
+            if len(simplified_pts) >= 2:
+                p_prev = simplified_pts[-2]
+                p_curr = simplified_pts[-1]
+                same_x = abs(p_prev[1] - p_curr[1]) < 1e-4 and abs(p_curr[1] - pt[1]) < 1e-4
+                same_y = abs(p_prev[2] - p_curr[2]) < 1e-4 and abs(p_curr[2] - pt[2]) < 1e-4
+                if same_x or same_y:
+                    simplified_pts[-1] = pt
+                    continue
+            simplified_pts.append(pt)
+        points = simplified_pts
+
+        # Place label along the primary waypoint corridor
+        wp0_x = round(intermediate_waypoints[0][0] - origin_x, 4)
+        wp0_y = round(intermediate_waypoints[0][1] - origin_y, 4)
+        if not is_horiz_flow:
+            if base_src == "Left":
+                wp0_x = round(min(wp0_x, x_begin - 0.35), 4)
+            elif base_src == "Right":
+                wp0_x = round(max(wp0_x, x_begin + 0.35), 4)
+            txt_px = str(round(wp0_x, 4))
+            txt_py = str(round(wp0_y, 4))
+            txt_px_f = f"{round(wp0_x, 4)}"
+            txt_py_f = f"{round(wp0_y, 4)}"
+        else:
+            if base_src == "Bottom":
+                wp0_y = round(min(wp0_y, y_begin - 0.35), 4)
+            elif base_src == "Top":
+                wp0_y = round(max(wp0_y, y_begin + 0.35), 4)
+            txt_px = str(round(wp0_x, 4))
+            txt_py = str(round(wp0_y + 0.18, 4))
+            txt_px_f = f"{round(wp0_x, 4)}"
+            txt_py_f = f"{round(wp0_y + 0.18, 4)}"
+
+    elif not is_dynamic:
+        points = [
+            ("MoveTo", x_begin, y_begin),
+            ("LineTo", x_end, y_end),
+        ]
         txt_px = str(round(w * 0.5, 4))
         txt_py = str(round(h * 0.5 + 0.15, 4))
         txt_px_f = "Width*0.5"
-        txt_py_f = "Height*0.5+11 pt"
+        txt_py_f = "Height*0.5+0.15"
+    elif w < 0.08:
+        # Collinear vertical line
+        points = [
+            ("MoveTo", x_begin, y_begin),
+            ("LineTo", x_end, y_end),
+        ]
+        txt_loc_px = "0"
+        txt_loc_px_f = "TxtWidth*0"
+        horz_align = "0"
+        txt_px = str(round(w * 0.5 + 0.10, 4))
+        txt_py = str(round(h * 0.45, 4))
+        txt_px_f = "Width*0.5+0.10"
+        txt_py_f = "Height*0.45"
+    elif h < 0.08:
+        # Collinear horizontal line
+        points = [
+            ("MoveTo", x_begin, y_begin),
+            ("LineTo", x_end, y_end),
+        ]
+        txt_px = str(round(w * 0.5, 4))
+        txt_py = str(round(h * 0.5 + 0.18, 4))
+        txt_px_f = "Width*0.5"
+        txt_py_f = "Height*0.5+0.18"
+    else:
+        # Compute orthogonal right-angle bend points
+        if base_src in ("Top", "Bottom") and base_dst in ("Left", "Right"):
+            points = [
+                ("MoveTo", x_begin, y_begin),
+                ("LineTo", x_begin, y_end),
+                ("LineTo", x_end, y_end),
+            ]
+            txt_px = str(round(w * 0.5, 4))
+            txt_py = str(round(y_end + 0.16, 4))
+            txt_px_f = "Width*0.5"
+            txt_py_f = f"{round(y_end + 0.16, 4)}"
+        elif base_src in ("Left", "Right") and base_dst in ("Top", "Bottom"):
+            points = [
+                ("MoveTo", x_begin, y_begin),
+                ("LineTo", x_end, y_begin),
+                ("LineTo", x_end, y_end),
+            ]
+            if w < 0.85:
+                txt_loc_px = "0"
+                txt_loc_px_f = "TxtWidth*0"
+                horz_align = "0"
+                txt_px = str(round(x_end + 0.10, 4))
+                txt_py = str(round(h * 0.5, 4))
+                txt_px_f = f"{round(x_end + 0.10, 4)}"
+                txt_py_f = "Height*0.5"
+            else:
+                frac_x = 0.62 if dx >= 0 else 0.38
+                txt_px = str(round(w * frac_x, 4))
+                txt_py = str(round(y_begin + 0.16, 4))
+                txt_px_f = f"Width*{frac_x}"
+                txt_py_f = f"{round(y_begin + 0.16, 4)}"
+        elif base_src in ("Left", "Right") and base_dst in ("Left", "Right"):
+            x_mid = round(w * 0.5, 4)
+            points = [
+                ("MoveTo", x_begin, y_begin),
+                ("LineTo", x_mid, y_begin),
+                ("LineTo", x_mid, y_end),
+                ("LineTo", x_end, y_end),
+            ]
+            # Place label over the target half of the horizontal run
+            frac_x = 0.65 if dx >= 0 else 0.35
+            txt_px = str(round(w * frac_x, 4))
+            txt_py = str(round( y_end + 0.16, 4))
+            txt_px_f = f"Width*{frac_x}"
+            txt_py_f = f"{round(y_end + 0.16, 4)}"
+        elif base_src in ("Top", "Bottom") and base_dst in ("Top", "Bottom"):
+            y_mid = round(h * 0.5, 4)
+            points = [
+                ("MoveTo", x_begin, y_begin),
+                ("LineTo", x_begin, y_mid),
+                ("LineTo", x_end, y_mid),
+                ("LineTo", x_end, y_end),
+            ]
+            # Place label centered over the target half of the horizontal segment
+            frac_x = 0.62 if dx >= 0 else 0.38
+            txt_px = str(round(w * frac_x, 4))
+            txt_py = str(round(y_mid + 0.16, 4))
+            txt_px_f = f"Width*{frac_x}"
+            txt_py_f = "Height*0.5+0.16"
+        elif (routing_direction or "").upper() in ("LR", "RL"):
+            x_mid = round(w * 0.5, 4)
+            points = [
+                ("MoveTo", x_begin, y_begin),
+                ("LineTo", x_mid, y_begin),
+                ("LineTo", x_mid, y_end),
+                ("LineTo", x_end, y_end),
+            ]
+        else:
+            y_mid = round(h * 0.5, 4)
+            points = [
+                ("MoveTo", x_begin, y_begin),
+                ("LineTo", x_begin, y_mid),
+                ("LineTo", x_end, y_mid),
+                ("LineTo", x_end, y_end),
+            ]
+            frac_x = 0.62 if dx >= 0 else 0.38
+            txt_px = str(round(w * frac_x, 4))
+            txt_py = str(round(y_mid + 0.16, 4))
+            txt_px_f = f"Width*{frac_x}"
+            txt_py_f = "Height*0.5+0.16"
 
     jump_code = "1" if is_dynamic else "0"
 
     cells.extend([
-        build_cell("ConRouteJumpCode", jump_code),
-        build_cell("ConRouteJumpStyle", "0"),
-        build_cell("ConRouteJumpDirX", "0"),
-        build_cell("ConRouteJumpDirY", "0"),
+        build_cell("ConLineJumpCode", jump_code),
+        build_cell("ConLineJumpStyle", "0"),
+        build_cell("ConLineJumpDirX", "0"),
+        build_cell("ConLineJumpDirY", "0"),
         build_cell("FillPattern", "0"),
         build_cell("FillForegnd", "0"),
         build_cell("FillBkgnd", "0"),
@@ -826,11 +1345,12 @@ def build_1d_connector_xml(
         build_cell("LinePattern", str(line_pattern), f"GUARD({line_pattern})" if line_pattern != 1 else None),
         build_cell("BeginArrow", str(begin_arrow)),
         build_cell("EndArrow", str(end_arrow)),
+        build_cell("BeginArrowSize", str(end_arrow_size)),
         build_cell("EndArrowSize", str(end_arrow_size)),
         build_cell("TextBkgnd", text_bkgnd_hex),
-        build_cell("TxtWidth", "1.6", "TEXTWIDTH(TheText)+16 pt"),
-        build_cell("TxtHeight", "0.35", "TEXTHEIGHT(TheText, TxtWidth)"),
-        build_cell("TxtLocPinX", "0.8", "TxtWidth*0.5"),
+        build_cell("TxtWidth", "1.6", "TEXTWIDTH(TheText)+0.22"),
+        build_cell("TxtHeight", "0.35", "TEXTHEIGHT(TheText,TxtWidth)"),
+        build_cell("TxtLocPinX", txt_loc_px, txt_loc_px_f),
         build_cell("TxtLocPinY", "0.175", "TxtHeight*0.5"),
         build_cell("TxtPinX", txt_px, txt_px_f),
         build_cell("TxtPinY", txt_py, txt_py_f),
@@ -844,112 +1364,10 @@ def build_1d_connector_xml(
   <Cell N='Size' V='{font_size_pt / 72.0}' U='IN'/>
 </Row></Section>"""
 
-    para_section = """<Section N='Paragraph'><Row IX='0'>
+    para_section = f"""<Section N='Paragraph'><Row IX='0'>
   <Cell N='IndFirst' V='0' U='IN'/><Cell N='IndLeft' V='0' U='IN'/><Cell N='IndRight' V='0' U='IN'/>
-  <Cell N='HorzAlign' V='1'/>
+  <Cell N='HorzAlign' V='{horz_align}'/>
 </Row></Section>"""
-
-    x_begin = 0.0 if dx >= 0 else round(w, 4)
-    y_begin = 0.0 if dy >= 0 else round(h, 4)
-    x_end = round(w, 4) if dx >= 0 else 0.0
-    y_end = round(h, 4) if dy >= 0 else 0.0
-
-    if intermediate_waypoints:
-        # Route through intermediate dummy waypoints
-        points = [("MoveTo", x_begin, y_begin)]
-        cur_x, cur_y = x_begin, y_begin
-        for wx, wy in intermediate_waypoints:
-            lx = min(w, max(0.0, (wx - begin_x) if dx >= 0 else (begin_x - wx)))
-            ly = min(h, max(0.0, (wy - begin_y) if dy >= 0 else (begin_y - wy)))
-            # Orthogonal step
-            points.append(("LineTo", cur_x, ly))
-            points.append(("LineTo", lx, ly))
-            cur_x, cur_y = lx, ly
-        points.append(("LineTo", cur_x, y_end))
-        points.append(("LineTo", x_end, y_end))
-    elif not is_dynamic or (w < 0.05 and h < 0.05) or w < 0.05 or h < 0.05:
-        points = [
-            ("MoveTo", x_begin, y_begin),
-            ("LineTo", x_end, y_end),
-        ]
-    elif w < 0.05:
-        # Collinear vertical line
-        points = [
-            ("MoveTo", x_begin, y_begin),
-            ("LineTo", x_end, y_end),
-        ]
-    elif h < 0.05:
-        # Collinear horizontal line
-        points = [
-            ("MoveTo", x_begin, y_begin),
-            ("LineTo", x_end, y_end),
-        ]
-    else:
-        # Compute orthogonal right-angle bend points
-        if src_port in ("Top", "Bottom") and dst_port in ("Left", "Right"):
-            # L-bend: vertical exit, horizontal entry
-            points = [
-                ("MoveTo", x_begin, y_begin),
-                ("LineTo", x_begin, y_end),
-                ("LineTo", x_end, y_end),
-            ]
-        elif src_port in ("Left", "Right") and dst_port in ("Top", "Bottom"):
-            # L-bend: horizontal exit, vertical entry
-            points = [
-                ("MoveTo", x_begin, y_begin),
-                ("LineTo", x_end, y_begin),
-                ("LineTo", x_end, y_end),
-            ]
-        elif src_port in ("Left", "Right") and dst_port in ("Left", "Right"):
-            # Horizontal S/Z-bend
-            x_mid = round(w * 0.5, 4)
-            points = [
-                ("MoveTo", x_begin, y_begin),
-                ("LineTo", x_mid, y_begin),
-                ("LineTo", x_mid, y_end),
-                ("LineTo", x_end, y_end),
-            ]
-        elif src_port in ("Top", "Bottom") and dst_port in ("Top", "Bottom"):
-            # Vertical S/Z-bend
-            y_mid = round(h * 0.5, 4)
-            points = [
-                ("MoveTo", x_begin, y_begin),
-                ("LineTo", x_begin, y_mid),
-                ("LineTo", x_end, y_mid),
-                ("LineTo", x_end, y_end),
-            ]
-        elif routing_direction in ("LR", "RL"):
-            x_mid = round(w * 0.5, 4)
-            points = [
-                ("MoveTo", x_begin, y_begin),
-                ("LineTo", x_mid, y_begin),
-                ("LineTo", x_mid, y_end),
-                ("LineTo", x_end, y_end),
-            ]
-        elif routing_direction in ("TD", "TB", "BT"):
-            y_mid = round(h * 0.5, 4)
-            points = [
-                ("MoveTo", x_begin, y_begin),
-                ("LineTo", x_begin, y_mid),
-                ("LineTo", x_end, y_mid),
-                ("LineTo", x_end, y_end),
-            ]
-        elif abs(dx) > abs(dy):
-            x_mid = round(w * 0.5, 4)
-            points = [
-                ("MoveTo", x_begin, y_begin),
-                ("LineTo", x_mid, y_begin),
-                ("LineTo", x_mid, y_end),
-                ("LineTo", x_end, y_end),
-            ]
-        else:
-            y_mid = round(h * 0.5, 4)
-            points = [
-                ("MoveTo", x_begin, y_begin),
-                ("LineTo", x_begin, y_mid),
-                ("LineTo", x_end, y_mid),
-                ("LineTo", x_end, y_end),
-            ]
 
     geom_rows = [
         f"<Row T='{t}' IX='{idx}'><Cell N='X' V='{round(rx, 4)}'/><Cell N='Y' V='{round(ry, 4)}'/></Row>"
@@ -1064,12 +1482,12 @@ def build_self_loop_xml(
   <Cell N='FillBkgnd' V='0'/>
   <Cell N='ObjType' V='1'/>
   <Cell N='TextBkgnd' V='{text_bkgnd_hex}'/>
-  <Cell N='TxtWidth' V='1.6' F='TEXTWIDTH(TheText)+8 pt'/>
-  <Cell N='TxtHeight' V='0.35' F='TEXTHEIGHT(TheText, TxtWidth)'/>
-  <Cell N='TxtLocPinX' V='0.8' F='TxtWidth*0.5'/>
+  <Cell N='TxtWidth' V='1.6' F='TEXTWIDTH(TheText)+0.15'/>
+  <Cell N='TxtHeight' V='0.35' F='TEXTHEIGHT(TheText,TxtWidth)'/>
+  <Cell N='TxtLocPinX' V='0' F='TxtWidth*0'/>
   <Cell N='TxtLocPinY' V='0.175' F='TxtHeight*0.5'/>
-  <Cell N='TxtPinX' V='{round(w * 0.5 + 0.1, 4)}' F='Width*0.5+8 pt'/>
-  <Cell N='TxtPinY' V='{round(h + 0.18, 4)}' F='Height*1+12 pt'/>
+  <Cell N='TxtPinX' V='{round(w + 0.12, 4)}' F='Width+0.12'/>
+  <Cell N='TxtPinY' V='{round(h * 0.5, 4)}' F='Height*0.5'/>
   <Cell N='TxtAngle' V='0'/>
   <Section N='Character'><Row IX='0'>
     <Cell N='Color' V='{text_hex}'/>

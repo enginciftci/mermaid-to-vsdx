@@ -15,6 +15,7 @@ from .shapesheet import (
     build_connect_records,
     calculate_connector_endpoints,
     calculate_connector_endpoints_and_ports,
+    distribute_shared_ports,
 )
 from .opc_package import package_vsdx
 
@@ -38,8 +39,9 @@ def compile_class_diagram_to_vsdx(
 
         c_title = cls.display_label if cls.display_label else cls.name
         all_lines = [c_title]
-        if cls.annotation:
-            all_lines.insert(0, f"<<{cls.annotation}>>")
+        clean_ann = cls.annotation.strip("<> ") if cls.annotation else ""
+        if clean_ann:
+            all_lines.insert(0, f"<<{clean_ann}>>")
         for a in attrs:
             prefix = a.visibility if a.visibility else "+"
             all_lines.append(f"{prefix} {a.return_type} {a.name}" if a.return_type else f"{prefix} {a.name}")
@@ -48,19 +50,27 @@ def compile_class_diagram_to_vsdx(
             sig = f"{m.name}({m.parameters})" if m.parameters else f"{m.name}()"
             all_lines.append(f"{prefix} {sig}: {m.return_type}" if m.return_type else f"{prefix} {sig}")
 
-        max_pt = max(estimate_line_width_pt(l, 9.5) for l in all_lines)
+        max_pt = max(estimate_line_width_pt(l, 9.5, bold=(idx == len(all_lines) - len(attrs) - len(meths) - 1)) for idx, l in enumerate(all_lines))
         w_in = max(2.4, round(max_pt / 72.0 + 0.6, 2))
 
         # Heights
-        title_h = 0.55 if cls.annotation else 0.4
+        title_h = 0.55 if clean_ann else 0.4
         attr_h = max(0.3, len(attrs) * 0.22 + 0.1)
         meth_h = max(0.3, len(meths) * 0.22 + 0.1)
         total_h = round(title_h + attr_h + meth_h, 2)
 
         class_dims[cid] = (w_in, total_h, None)
 
-    # 2. Extract relationships
-    edges = [(rel.source_name, rel.target_name) for rel in diagram.relationships]
+    # 2. Extract relationships for layout:
+    # For INHERITANCE and REALIZATION, rel.source_name is the subclass and rel.target_name is the superclass.
+    # Pass (rel.target_name, rel.source_name) to SugiyamaLayoutEngine so superclasses sit in the upper rank
+    # and subclasses sit below them.
+    layout_edges = [
+        (rel.target_name, rel.source_name)
+        if rel.rel_type in (RelationshipType.INHERITANCE, RelationshipType.REALIZATION)
+        else (rel.source_name, rel.target_name)
+        for rel in diagram.relationships
+    ]
 
     # 3. Layout engine (respect diagram.direction: TD, LR, RL, BT)
     layout_engine = SugiyamaLayoutEngine(
@@ -69,7 +79,37 @@ def compile_class_diagram_to_vsdx(
         node_gap=0.8,
         page_margin=1.0,
     )
-    layout_res = layout_engine.layout(class_dims, edges)
+    layout_res = layout_engine.layout(class_dims, layout_edges)
+
+    # 3b. Compute distributed ports across all class relationships
+    nodes_geom: Dict[str, Tuple[float, float, float, float]] = {
+        cid: (n.pin_x, n.pin_y, n.width, n.height)
+        for cid, n in layout_res.nodes.items()
+    }
+    edge_pairs: List[Tuple[str, str]] = [
+        (rel.source_name, rel.target_name) for rel in diagram.relationships
+    ]
+    custom_ports: Dict[int, Tuple[float, float, float, float, str, str, int, int]] = {}
+    for idx, rel in enumerate(diagram.relationships):
+        if rel.source_name in nodes_geom and rel.target_name in nodes_geom and rel.source_name != rel.target_name:
+            sx, sy, sw, sh = nodes_geom[rel.source_name]
+            dx, dy, dw, dh = nodes_geom[rel.target_name]
+            bx, by, ex, ey, src_port, dst_port, src_part, dst_part = calculate_connector_endpoints_and_ports(
+                sx, sy, sw, sh, dx, dy, dw, dh, direction=diagram.direction
+            )
+            # When source is below target (e.g. Subclass -> Superclass inheritance), connect Top of Subclass to Bottom of Superclass
+            if src_port == dst_port:
+                ex_f, ey_f, bx_f, by_f, dst_port_f, src_port_f, dst_part_f, src_part_f = calculate_connector_endpoints_and_ports(
+                    dx, dy, dw, dh, sx, sy, sw, sh, direction=diagram.direction
+                )
+                custom_ports[idx] = (bx_f, by_f, ex_f, ey_f, src_port_f, dst_port_f, src_part_f, dst_part_f)
+
+    distributed_routes, node_extra_connections = distribute_shared_ports(
+        nodes_geom=nodes_geom,
+        edge_pairs=edge_pairs,
+        direction=diagram.direction,
+        custom_ports=custom_ports,
+    )
 
     shapes_xml_list: List[str] = []
     connects_xml_list: List[str] = []
@@ -89,7 +129,8 @@ def compile_class_diagram_to_vsdx(
         cx = l_node.pin_x
         cy = l_node.pin_y
 
-        is_interface = bool(cls.annotation and "interface" in cls.annotation.lower())
+        clean_ann = cls.annotation.strip("<> ") if cls.annotation else ""
+        is_interface = bool(clean_ann and "interface" in clean_ann.lower())
         fill_col = palette.decision_fill if is_interface else palette.default_fill
         border_col = palette.decision_border if is_interface else palette.default_border
         text_col = "#ffffff" if is_dark_color(fill_col) else palette.default_text
@@ -115,11 +156,11 @@ def compile_class_diagram_to_vsdx(
             has_connections=False,
         ))
 
-        # Child 2: Title compartment at top (transparent text box)
+        # Child 2: Title compartment at top (transparent text box, bold)
         c_title = cls.display_label if cls.display_label else cls.name
-        title_lines = [f"<<{cls.annotation}>>", c_title] if cls.annotation else [c_title]
+        title_lines = [f"<<{clean_ann}>>", c_title] if clean_ann else [c_title]
         title_text = "\n".join(title_lines)
-        title_h = 0.55 if cls.annotation else 0.4
+        title_h = 0.55 if clean_ann else 0.4
         title_pin_y = round(h - title_h * 0.5, 4)
 
         title_id = shape_id_counter
@@ -140,6 +181,7 @@ def compile_class_diagram_to_vsdx(
             line_pattern=0,
             font_name=font_name,
             font_size_pt=10.0,
+            bold=True,
             has_connections=False,
         ))
 
@@ -238,7 +280,7 @@ def compile_class_diagram_to_vsdx(
             is_dynamic=False,
         ))
 
-        # Enclosing Group Shape
+        # Enclosing Group Shape with distributed connection ports
         shapes_xml_list.append(build_group_shape_xml(
             group_id=main_id,
             name=f"Class_{cid}",
@@ -248,10 +290,11 @@ def compile_class_diagram_to_vsdx(
             height=h,
             child_shapes_xml=child_shapes,
             has_connections=True,
+            extra_connections=node_extra_connections.get(cid),
         ))
 
     # 5. Render UML Relationship Connectors
-    for rel in diagram.relationships:
+    for idx, rel in enumerate(diagram.relationships):
         if rel.source_name not in class_to_shape_id or rel.target_name not in class_to_shape_id:
             continue
 
@@ -260,8 +303,6 @@ def compile_class_diagram_to_vsdx(
 
         src_s_id = class_to_shape_id[rel.source_name]
         dst_s_id = class_to_shape_id[rel.target_name]
-        src_pos = layout_res.nodes[rel.source_name]
-        dst_pos = layout_res.nodes[rel.target_name]
 
         line_pat = 1
         begin_arr = 0
@@ -270,19 +311,19 @@ def compile_class_diagram_to_vsdx(
 
         rt = rel.rel_type
         if rt == RelationshipType.INHERITANCE:
-            end_arr = 14  # Closed hollow triangle for UML inheritance
+            end_arr = 16  # Hollow triangle for UML inheritance
         elif rt == RelationshipType.REALIZATION:
             line_pat = 2  # Dashed line
-            end_arr = 14
+            end_arr = 16  # Hollow triangle for UML realization
         elif rt == RelationshipType.COMPOSITION:
-            begin_arr = 20  # Filled diamond
+            begin_arr = 22  # Filled diamond for UML composition
         elif rt == RelationshipType.AGGREGATION:
-            begin_arr = 21  # Hollow diamond
+            begin_arr = 10  # Hollow diamond for UML aggregation
         elif rt == RelationshipType.ASSOCIATION:
-            end_arr = 13
+            end_arr = 13  # Open arrow for UML association
         elif rt == RelationshipType.DEPENDENCY:
-            line_pat = 2
-            end_arr = 13
+            line_pat = 2  # Dashed line
+            end_arr = 13  # Open arrow for UML dependency
         elif rt == RelationshipType.DASHED_LINK:
             line_pat = 2
 
@@ -296,17 +337,13 @@ def compile_class_diagram_to_vsdx(
             label_parts.append(rel.multiplicity_target)
         full_label = " ".join(label_parts)
 
-        bx, by, ex, ey, src_port, dst_port, src_part, dst_part = calculate_connector_endpoints_and_ports(
-            src_x=src_pos.pin_x,
-            src_y=src_pos.pin_y,
-            src_w=src_pos.width,
-            src_h=src_pos.height,
-            dst_x=dst_pos.pin_x,
-            dst_y=dst_pos.pin_y,
-            dst_w=dst_pos.width,
-            dst_h=dst_pos.height,
-            direction=diagram.direction,
-        )
+        bx, by, ex, ey, src_port, dst_port, src_part, dst_part = distributed_routes[idx]
+
+        waypoints = layout_res.edge_routes.get((rel.source_name, rel.target_name))
+        if waypoints is None and rt in (RelationshipType.INHERITANCE, RelationshipType.REALIZATION):
+            rev_wp = layout_res.edge_routes.get((rel.target_name, rel.source_name))
+            if rev_wp:
+                waypoints = list(reversed(rev_wp))
 
         shapes_xml_list.append(build_1d_connector_xml(
             connector_id=c_id,
@@ -330,7 +367,7 @@ def compile_class_diagram_to_vsdx(
             src_port=src_port,
             dst_port=dst_port,
             routing_direction=diagram.direction,
-            intermediate_waypoints=layout_res.edge_routes.get((rel.source_name, rel.target_name), []),
+            intermediate_waypoints=waypoints or [],
         ))
 
         connects_xml_list.append(build_connect_records(
@@ -343,11 +380,84 @@ def compile_class_diagram_to_vsdx(
             dst_part=dst_part,
         ))
 
-    # 6. Serialize to vsdx
+    # 6. Render Notes if present
+    page_w = layout_res.page_width
+    page_h = layout_res.page_height
+    if diagram.notes:
+        for n_idx, note in enumerate(diagram.notes):
+            nw, nh, wrapped_n = estimate_text_dimensions(
+                note.text, font_size_pt=9.0, min_width_in=1.6, min_height_in=0.5, max_width_in=2.4
+            )
+            note_text_str = "\n".join(wrapped_n) if isinstance(wrapped_n, list) else str(wrapped_n)
+            note_id = shape_id_counter
+            shape_id_counter += 1
+
+            if note.target_class and note.target_class in layout_res.nodes:
+                t_node = layout_res.nodes[note.target_class]
+                nx = round(t_node.pin_x + t_node.width * 0.5 + nw * 0.5 + 0.55, 4)
+                ny = round(t_node.pin_y, 4)
+                page_w = max(page_w, round(nx + nw * 0.5 + 0.8, 2))
+
+                shapes_xml_list.append(build_2d_shape_xml(
+                    shape_id=note_id,
+                    name=f"ClassNote_{note_id}",
+                    pin_x=nx,
+                    pin_y=ny,
+                    width=nw,
+                    height=nh,
+                    text=note_text_str,
+                    shape_type="rectangle",
+                    fill_color=palette.note_fill,
+                    line_color=palette.note_border,
+                    text_color="#ffffff" if is_dark_color(palette.note_fill) else palette.note_text,
+                    line_weight_in=0.015,
+                    font_name=font_name,
+                    font_size_pt=9.0,
+                    has_connections=False,
+                ))
+
+                link_id = shape_id_counter
+                shape_id_counter += 1
+                shapes_xml_list.append(build_1d_connector_xml(
+                    connector_id=link_id,
+                    begin_x=round(nx - nw * 0.5, 4),
+                    begin_y=ny,
+                    end_x=round(t_node.pin_x + t_node.width * 0.5, 4),
+                    end_y=ny,
+                    line_color=palette.note_border,
+                    line_weight_in=0.015,
+                    line_pattern=2,
+                    begin_arrow=0,
+                    end_arrow=0,
+                    is_dynamic=False,
+                ))
+            else:
+                nx = round(1.0 + nw * 0.5 + n_idx * (nw + 0.4), 4)
+                ny = round(page_h - 0.55, 4)
+                page_w = max(page_w, round(nx + nw * 0.5 + 0.8, 2))
+                shapes_xml_list.append(build_2d_shape_xml(
+                    shape_id=note_id,
+                    name=f"ClassNote_{note_id}",
+                    pin_x=nx,
+                    pin_y=ny,
+                    width=nw,
+                    height=nh,
+                    text=note_text_str,
+                    shape_type="rectangle",
+                    fill_color=palette.note_fill,
+                    line_color=palette.note_border,
+                    text_color="#ffffff" if is_dark_color(palette.note_fill) else palette.note_text,
+                    line_weight_in=0.015,
+                    font_name=font_name,
+                    font_size_pt=9.0,
+                    has_connections=False,
+                ))
+
+    # 7. Serialize to vsdx
     return package_vsdx(
         output_path=output_path,
         shapes_xml="\n".join(shapes_xml_list),
         connects_xml="\n".join(connects_xml_list),
-        page_width=layout_res.page_width,
-        page_height=layout_res.page_height,
+        page_width=page_w,
+        page_height=page_h,
     )

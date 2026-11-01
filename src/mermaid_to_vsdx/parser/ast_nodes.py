@@ -1,5 +1,5 @@
 """
-AST Node definitions for Mermaid diagrams (Flowcharts & Sequence diagrams).
+AST Node definitions for Mermaid diagrams.
 """
 
 from dataclasses import dataclass, field
@@ -14,6 +14,11 @@ class DiagramType(Enum):
     STATE_DIAGRAM = auto()
     ER_DIAGRAM = auto()
     BLOCK = auto()
+    MINDMAP = auto()
+    TIMELINE = auto()
+    QUADRANT = auto()
+    PIE = auto()
+    GANTT = auto()
     UNKNOWN = auto()
 
 
@@ -31,14 +36,15 @@ class ShapeType(Enum):
     PARALLELOGRAM_ALT = "parallelogram_left"
     TRAPEZOID = "trapezoid"          # [/text\]
     TRAPEZOID_ALT = "trapezoid_inverted"  # [\text/]
-    DOUBLE_CIRCLE = "double_circle"
+    DOUBLE_CIRCLE = "double_circle"  # (((text)))
     ROUNDED_RECT = "rounded"
 
 
 class EdgeStyle(Enum):
-    SOLID = "solid"      # --- or -->
-    DOTTED = "dotted"    # -.- or -.->
-    THICK = "thick"      # === or ==>
+    SOLID = "solid"          # --- or -->
+    DOTTED = "dotted"        # -.- or -.->
+    THICK = "thick"          # === or ==>
+    INVISIBLE = "invisible"  # ~~~
 
 
 class ArrowType(Enum):
@@ -55,6 +61,7 @@ class Node:
     shape: ShapeType = ShapeType.RECTANGLE
     classes: List[str] = field(default_factory=list)
     style: Dict[str, str] = field(default_factory=dict)
+    bold: bool = False
 
 
 @dataclass
@@ -65,6 +72,7 @@ class Edge:
     style: EdgeStyle = EdgeStyle.SOLID
     arrow_start: ArrowType = ArrowType.NONE
     arrow_end: ArrowType = ArrowType.ARROW
+    link_style: Dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -74,6 +82,7 @@ class Subgraph:
     node_ids: List[str] = field(default_factory=list)
     children: List["Subgraph"] = field(default_factory=list)
     direction: Optional[str] = None
+    style: Dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -82,6 +91,8 @@ class FlowchartDiagram:
     nodes: Dict[str, Node] = field(default_factory=dict)
     edges: List[Edge] = field(default_factory=list)
     subgraphs: List[Subgraph] = field(default_factory=list)
+    class_defs: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    link_styles: Dict[int, Dict[str, str]] = field(default_factory=dict)
 
 
 class MessageArrow(Enum):
@@ -100,6 +111,13 @@ class Participant:
     id: str
     label: str
     is_actor: bool = False
+
+
+@dataclass
+class ParticipantBox:
+    title: str = ""
+    color: str = ""
+    participant_ids: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -126,16 +144,26 @@ class Activation:
 
 
 @dataclass
+class ElseBranch:
+    title: str = ""
+    branch_type: str = "else"  # "else", "and", "option"
+    items: List[Union["Message", "Note", "Activation", "LoopBlock"]] = field(default_factory=list)
+
+
+@dataclass
 class LoopBlock:
     title: str = ""
     block_type: str = "loop"
     items: List[Union["Message", "Note", "Activation", "LoopBlock"]] = field(default_factory=list)
+    else_branches: List[ElseBranch] = field(default_factory=list)
 
 
 @dataclass
 class SequenceDiagram:
     title: str = ""
+    autonumber: bool = False
     participants: List[Participant] = field(default_factory=list)
+    boxes: List[ParticipantBox] = field(default_factory=list)
     items: List[Union[Message, Note, Activation, LoopBlock]] = field(default_factory=list)
 
 
@@ -212,6 +240,7 @@ class StateNode:
     node_type: StateNodeType = StateNodeType.STATE
     description: str = ""
     children: List[str] = field(default_factory=list)
+    parent_id: Optional[str] = None
 
 
 @dataclass
@@ -244,12 +273,14 @@ class ERAttribute:
     attr_type: str = ""
     is_pk: bool = False
     is_fk: bool = False
+    is_uk: bool = False
     comment: str = ""
 
 
 @dataclass
 class EREntity:
     name: str
+    alias: str = ""
     attributes: List[ERAttribute] = field(default_factory=list)
 
 
@@ -299,3 +330,94 @@ class BlockDiagram:
     edges: List[BlockEdge] = field(default_factory=list)
     class_defs: Dict[str, Dict[str, str]] = field(default_factory=dict)
 
+
+# --- Mindmap Diagram Models ---
+
+@dataclass
+class MindmapNode:
+    id: str
+    label: str
+    shape: ShapeType = ShapeType.ROUNDED
+    level: int = 0
+    children: List["MindmapNode"] = field(default_factory=list)
+
+
+@dataclass
+class MindmapDiagram:
+    title: str = ""
+    root: Optional[MindmapNode] = None
+
+
+# --- Timeline Diagram Models ---
+
+@dataclass
+class TimelinePeriod:
+    period: str
+    events: List[str] = field(default_factory=list)
+    section: str = ""
+
+
+@dataclass
+class TimelineDiagram:
+    title: str = ""
+    periods: List[TimelinePeriod] = field(default_factory=list)
+
+
+# --- Quadrant Chart Models ---
+
+@dataclass
+class QuadrantPoint:
+    label: str
+    x: float
+    y: float
+
+
+@dataclass
+class QuadrantDiagram:
+    title: str = ""
+    x_axis_left: str = "Low"
+    x_axis_right: str = "High"
+    y_axis_bottom: str = "Low"
+    y_axis_top: str = "High"
+    quadrant_1: str = "Quadrant 1"
+    quadrant_2: str = "Quadrant 2"
+    quadrant_3: str = "Quadrant 3"
+    quadrant_4: str = "Quadrant 4"
+    points: List[QuadrantPoint] = field(default_factory=list)
+
+
+# --- Pie Chart Models ---
+
+@dataclass
+class PieSlice:
+    label: str
+    value: float
+
+
+@dataclass
+class PieDiagram:
+    title: str = ""
+    show_data: bool = False
+    slices: List[PieSlice] = field(default_factory=list)
+
+
+# --- Gantt Chart Models ---
+
+@dataclass
+class GanttTask:
+    id: str
+    name: str
+    section: str = ""
+    status: str = ""        # "done", "active", "crit"
+    start_raw: str = ""
+    end_raw: str = ""
+    start_idx: float = 0.0
+    duration: float = 1.0
+    is_milestone: bool = False
+
+
+@dataclass
+class GanttDiagram:
+    title: str = ""
+    date_format: str = "YYYY-MM-DD"
+    tasks: List[GanttTask] = field(default_factory=list)

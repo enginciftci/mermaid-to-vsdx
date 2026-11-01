@@ -162,8 +162,24 @@ def draw_node_shape(
     width = x2 - x1
     height = y2 - y1
 
-    if shape_type in (ShapeType.CIRCLE, ShapeType.ROUNDED):
-        if shape_type == ShapeType.CIRCLE:
+    if shape_type in (ShapeType.DOUBLE_CIRCLE, ShapeType.CIRCLE, ShapeType.ROUNDED):
+        if shape_type == ShapeType.DOUBLE_CIRCLE:
+            # Double concentric circle
+            dim = max(width, height)
+            outer = page.DrawOval(cx - dim / 2.0, cy - dim / 2.0, cx + dim / 2.0, cy + dim / 2.0)
+            style_shape(outer, palette.terminal_fill, palette.terminal_border, line_weight_pt=1.5, rounding_in=0)
+            inner_r = (dim / 2.0) * 0.88
+            inner = page.DrawOval(cx - inner_r, cy - inner_r, cx + inner_r, cy + inner_r)
+            style_shape(inner, palette.terminal_fill, palette.terminal_border, line_weight_pt=1.2, rounding_in=0)
+            try:
+                inner.CellsU("FillPattern").FormulaU = "0"
+                sel = page.CreateSelection(1)
+                sel.Select(outer, 2)
+                sel.Select(inner, 2)
+                shape = sel.Group()
+            except Exception:
+                shape = outer
+        elif shape_type == ShapeType.CIRCLE:
             # Equal aspect ratio circle
             dim = max(width, height)
             shape = page.DrawOval(cx - dim / 2.0, cy - dim / 2.0, cx + dim / 2.0, cy + dim / 2.0)
@@ -387,19 +403,23 @@ def connect_shapes(
     except Exception:
         pass
 
-    # Arrowheads (13 is standard clean arrowhead in Visio)
+    # Arrowheads (13=arrow, 10=circle, 24=cross)
+    arrow_map = {
+        ArrowType.NONE: "0",
+        ArrowType.ARROW: "13",
+        ArrowType.CIRCLE: "10",
+        ArrowType.CROSS: "24",
+    }
     try:
-        if arrow_end == ArrowType.ARROW:
-            connector.CellsU("EndArrow").FormulaU = "13"
+        end_code = arrow_map.get(arrow_end, "0")
+        connector.CellsU("EndArrow").FormulaU = end_code
+        if end_code != "0":
             connector.CellsU("EndArrowSize").FormulaU = "2"
-        else:
-            connector.CellsU("EndArrow").FormulaU = "0"
 
-        if arrow_start == ArrowType.ARROW:
-            connector.CellsU("BeginArrow").FormulaU = "13"
+        beg_code = arrow_map.get(arrow_start, "0")
+        connector.CellsU("BeginArrow").FormulaU = beg_code
+        if beg_code != "0":
             connector.CellsU("BeginArrowSize").FormulaU = "2"
-        else:
-            connector.CellsU("BeginArrow").FormulaU = "0"
     except Exception:
         pass
 

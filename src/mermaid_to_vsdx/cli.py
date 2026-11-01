@@ -1,6 +1,6 @@
 """
 Main command-line and application interface for Mermaid to Microsoft Visio Converter.
-Supports both Desktop GUI mode and Headless CLI mode.
+Supports both Desktop GUI mode and Headless CLI mode, including multi-page Markdown compilation.
 """
 
 import sys
@@ -13,9 +13,10 @@ if sys.stdout and hasattr(sys.stdout, "reconfigure"):
 if sys.stderr and hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-from .parser import extract_mermaid_from_markdown
+from .parser import extract_mermaid_from_markdown, extract_all_mermaid_from_markdown
 from .visio import convert_mermaid_to_visio, DEFAULT_PALETTE_NAME, PALETTES
 from .verifier import verify_and_capture_visio
+from .verifier.native_renderer import render_vsdx_to_png
 from .utils.unicode_helper import DEFAULT_FONT, verify_turkish_chars
 
 
@@ -31,12 +32,15 @@ def run_cli(args):
     with open(input_file, "r", encoding="utf-8") as f:
         raw_code = f.read()
 
+    blocks = extract_all_mermaid_from_markdown(raw_code)
     mermaid_code = extract_mermaid_from_markdown(raw_code)
-    if mermaid_code != raw_code.strip():
+    if len(blocks) > 1:
+        print(f"✓ Markdown Document: {len(blocks)} Mermaid diagram blocks extracted for multi-page .vsdx compilation.")
+    elif mermaid_code != raw_code.strip():
         print(f"✓ Markdown Document: Code block successfully extracted ({len(mermaid_code.splitlines())} lines).")
 
     # Turkish / Unicode character analysis
-    tr_info = verify_turkish_chars(mermaid_code)
+    tr_info = verify_turkish_chars(raw_code)
     if tr_info["has_turkish"]:
         print(f"✓ Unicode/Turkish Character Check: {tr_info['total_turkish_chars']} characters verified.")
 
@@ -46,7 +50,7 @@ def run_cli(args):
     engine_desc = "Headless OPC Compiler (Native)" if args.engine == "native" else "Visio COM Automation"
     print(f"Parsing Mermaid diagram and compiling to Visio ({engine_desc})...")
     diag_type, vsdx_path = convert_mermaid_to_visio(
-        mermaid_code=mermaid_code,
+        mermaid_code=raw_code if len(blocks) > 1 else mermaid_code,
         output_vsdx_path=output_path,
         palette_name=args.palette,
         font_name=args.font,
@@ -63,13 +67,25 @@ def run_cli(args):
                 output_image_path=screenshot_target,
                 verification_dir=args.verification_dir
             )
-            print(f"✓ Visual Verification Successful:")
+            print("✓ Visual Verification Successful (Microsoft Visio COM):")
             print(f"   Screenshot   : {res['image_path']}")
             print(f"   Resolution   : {res['width']}x{res['height']} pixels")
             print(f"   File Size    : {res['file_size_kb']} KB")
             print(f"   Render Time  : {res['render_time_sec']} seconds")
         except Exception as ver_err:
-            print(f"ℹ Visual verification skipped: {ver_err}", file=sys.stderr)
+            # Fallback to headless native PNG renderer
+            fallback_png = screenshot_target or os.path.join(
+                args.verification_dir, os.path.splitext(os.path.basename(vsdx_path))[0] + "_preview.png"
+            )
+            os.makedirs(os.path.dirname(os.path.abspath(fallback_png)), exist_ok=True)
+            nat_res = render_vsdx_to_png(vsdx_path, fallback_png)
+            if nat_res.get("success"):
+                print("✓ Headless Visual Preview Rendered:")
+                print(f"   Screenshot   : {nat_res['image_path']}")
+                print(f"   Resolution   : {nat_res['width']}x{nat_res['height']} pixels")
+                print(f"   File Size    : {nat_res['file_size_kb']} KB")
+            else:
+                print(f"ℹ Visual verification skipped: {ver_err}", file=sys.stderr)
 
 
 def main():
@@ -93,12 +109,11 @@ def main():
     if args.input:
         run_cli(args)
     else:
-        # Launch GUI
         try:
             from .gui import MermaidVisioApp
             app = MermaidVisioApp()
             app.mainloop()
-        except Exception as e:
+        except Exception:
             print("Notice: GUI could not be initialized in headless environment. Please provide an input diagram file.", file=sys.stderr)
             parser.print_help()
             sys.exit(1)

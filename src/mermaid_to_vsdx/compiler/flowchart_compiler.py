@@ -37,6 +37,13 @@ SHAPE_MAP = {
     ShapeType.DOUBLE_CIRCLE: "double_circle",
 }
 
+ARROW_CODE_MAP = {
+    ArrowType.NONE: 0,
+    ArrowType.ARROW: 13,
+    ArrowType.CIRCLE: 10,
+    ArrowType.CROSS: 24,
+}
+
 
 def _get_all_subgraphs_dict(subgraphs: List[Subgraph]) -> Dict[str, Subgraph]:
     result = {}
@@ -94,33 +101,52 @@ def compile_flowchart_to_vsdx(
         if node.shape == ShapeType.CYLINDER:
             min_w = 1.6
             min_h = 1.10
+        elif node.shape in (ShapeType.CIRCLE, ShapeType.DOUBLE_CIRCLE):
+            min_w = 0.95
+            min_h = 0.95
         elif node.shape in (ShapeType.PARALLELOGRAM, ShapeType.PARALLELOGRAM_ALT, ShapeType.TRAPEZOID, ShapeType.TRAPEZOID_ALT):
-            min_w = 1.85
+            min_w = 1.50
             min_h = 0.92
         elif node.shape == ShapeType.ASYMMETRIC:
             min_w = 1.85
             min_h = 0.90
         elif node.shape == ShapeType.DIAMOND:
-            min_w = 1.85
-            min_h = 0.95
+            min_w = 1.30
+            min_h = 0.76
         elif node.shape == ShapeType.HEXAGON:
-            min_w = 1.80
+            min_w = 1.45
             min_h = 0.85
         else:
             min_w = 1.5
             min_h = 0.75
 
+        max_w = 1.95 if node.shape == ShapeType.DIAMOND else 3.2
         w, h, lines = estimate_text_dimensions(
             text=node.label,
             font_size_pt=10.0,
             min_width_in=min_w,
             min_height_in=min_h,
-            max_width_in=3.2,
+            max_width_in=max_w,
         )
 
-        # Enforce 3D aspect ratio proportion for cylinders so they stay volumetric
+        # Improve shape proportions & inscribed text sizing
         if node.shape == ShapeType.CYLINDER:
             h = max(h, min_h, round(w * 0.60, 3))
+        elif node.shape in (ShapeType.CIRCLE, ShapeType.DOUBLE_CIRCLE):
+            side = round(max(w, h, 0.95) * 1.15, 2)
+            w = side
+            h = side
+        elif node.shape == ShapeType.DIAMOND:
+            w = max(1.85, round(w * 1.45, 2))
+            h = max(1.05, round(h * 1.38, 2))
+        elif node.shape in (
+            ShapeType.HEXAGON,
+            ShapeType.PARALLELOGRAM,
+            ShapeType.PARALLELOGRAM_ALT,
+            ShapeType.TRAPEZOID,
+            ShapeType.TRAPEZOID_ALT,
+        ):
+            w = max(1.75, round(w + 0.35, 2))
 
         node_dims[nid] = (w, h, node_subgraph.get(nid))
         node_wrapped_text[nid] = "\n".join(lines)
@@ -185,6 +211,8 @@ def compile_flowchart_to_vsdx(
     # 5b. Pre-calculate connector endpoints and distribute connection ports
     diamond_outgoing = defaultdict(list)
     for idx, edge in enumerate(diagram.edges):
+        if edge.style == EdgeStyle.INVISIBLE:
+            continue
         if edge.source_id in diagram.nodes and diagram.nodes[edge.source_id].shape == ShapeType.DIAMOND:
             diamond_outgoing[edge.source_id].append(idx)
 
@@ -193,6 +221,8 @@ def compile_flowchart_to_vsdx(
     dst_port_groups = defaultdict(list)
 
     for idx, edge in enumerate(diagram.edges):
+        if edge.style == EdgeStyle.INVISIBLE:
+            continue
         src_node = layout_res.nodes.get(edge.source_id) or layout_res.subgraphs.get(edge.source_id)
         dst_node = layout_res.nodes.get(edge.target_id) or layout_res.subgraphs.get(edge.target_id)
         if not src_node or not dst_node:
@@ -210,17 +240,59 @@ def compile_flowchart_to_vsdx(
             direction=diagram.direction,
         )
 
-        # Decision diamond branch separation: if 2 branches, route one out side (Right)
+        # Decision diamond branch separation: choose exit port based on actual target/waypoint position
         if edge.source_id in diamond_outgoing and len(diamond_outgoing[edge.source_id]) == 2:
-            branches = diamond_outgoing[edge.source_id]
-            is_second = (idx == branches[1])
-            lbl = (edge.label or "").lower()
-            is_negative = any(w in lbl for w in ("no", "false", "reject", "cancel", "fail", "hayır", "hata"))
-            if is_negative or (is_second and not any(w in (diagram.edges[branches[0]].label or "").lower() for w in ("no", "false"))):
-                src_port = "Right" if diagram.direction in ("TD", "TB") else "Bottom"
-                bx = round(src_node.pin_x + src_node.width * 0.5, 4) if src_port == "Right" else round(src_node.pin_x, 4)
-                by = round(src_node.pin_y, 4) if src_port == "Right" else round(src_node.pin_y - src_node.height * 0.5, 4)
-                src_part = 103 if src_port == "Right" else 101
+            wps = layout_res.edge_routes.get((edge.source_id, edge.target_id), [])
+            ref_x = wps[0][0] if wps else dst_node.pin_x
+            ref_y = wps[0][1] if wps else dst_node.pin_y
+            if diagram.direction in ("TD", "TB"):
+                right_tip = src_node.pin_x + src_node.width * 0.5
+                left_tip = src_node.pin_x - src_node.width * 0.5
+                if ref_x > src_node.pin_x + 0.25 and (wps or dst_node.pin_x >= right_tip + 0.15):
+                    src_port = "Right"
+                    bx = round(right_tip, 4)
+                    by = round(src_node.pin_y, 4)
+                    src_part = 103
+                elif ref_x < src_node.pin_x - 0.25 and (wps or dst_node.pin_x <= left_tip - 0.15):
+                    # Exit Left if another branch goes straight down (or if this is a skip-level corridor to the left)
+                    other_goes_down = False
+                    for o_idx in diamond_outgoing[edge.source_id]:
+                        if o_idx == idx:
+                            continue
+                        oe = diagram.edges[o_idx]
+                        o_wps = layout_res.edge_routes.get((oe.source_id, oe.target_id), [])
+                        o_dst = layout_res.nodes.get(oe.target_id) or layout_res.subgraphs.get(oe.target_id)
+                        o_rx = o_wps[0][0] if o_wps else (o_dst.pin_x if o_dst else src_node.pin_x)
+                        if abs(o_rx - src_node.pin_x) <= 0.25:
+                            other_goes_down = True
+                            break
+                    if other_goes_down or wps:
+                        src_port = "Left"
+                        bx = round(left_tip, 4)
+                        by = round(src_node.pin_y, 4)
+                        src_part = 102
+            elif diagram.direction in ("LR", "RL"):
+                if ref_y < src_node.pin_y - 0.25:
+                    src_port = "Bottom"
+                    bx = round(src_node.pin_x, 4)
+                    by = round(src_node.pin_y - src_node.height * 0.5, 4)
+                    src_part = 101
+        elif diagram.direction in ("LR", "RL"):
+            # For skip-level edges in LR/RL whose waypoint corridor is above or below src_node,
+            # exit Top/Bottom so the horizontal port remains clean for direct neighbor connections
+            wps = layout_res.edge_routes.get((edge.source_id, edge.target_id), [])
+            if wps:
+                wp0_y = wps[0][1]
+                if wp0_y > src_node.pin_y + src_node.height * 0.5 + 0.30:
+                    src_port = "Top"
+                    bx = round(src_node.pin_x, 4)
+                    by = round(src_node.pin_y + src_node.height * 0.5, 4)
+                    src_part = 100
+                elif wp0_y < src_node.pin_y - src_node.height * 0.5 - 0.30:
+                    src_port = "Bottom"
+                    bx = round(src_node.pin_x, 4)
+                    by = round(src_node.pin_y - src_node.height * 0.5, 4)
+                    src_part = 101
 
         edge_port_info[idx] = {
             "bx": bx, "by": by, "ex": ex, "ey": ey,
@@ -283,19 +355,36 @@ def compile_flowchart_to_vsdx(
                 continue
             k = len(edge_indices)
             def _get_src_y(i):
-                s = layout_res.nodes.get(diagram.edges[i].source_id) or layout_res.subgraphs.get(diagram.edges[i].source_id)
-                return s.pin_y if s else 0.0
+                wps = layout_res.edge_routes.get((diagram.edges[i].source_id, diagram.edges[i].target_id), [])
+                if wps:
+                    return wps[-1][1]
+                return edge_port_info[i]["by"]
             def _get_src_x(i):
-                s = layout_res.nodes.get(diagram.edges[i].source_id) or layout_res.subgraphs.get(diagram.edges[i].source_id)
-                return s.pin_x if s else 0.0
+                wps = layout_res.edge_routes.get((diagram.edges[i].source_id, diagram.edges[i].target_id), [])
+                if wps:
+                    return wps[-1][0]
+                return edge_port_info[i]["bx"]
 
             if side in ("Left", "Right"):
                 edge_indices.sort(key=_get_src_y)
             else:
                 edge_indices.sort(key=_get_src_x)
 
+            prev_frac = 0.0
             for order_idx, e_idx in enumerate(edge_indices):
                 frac = (order_idx + 1.0) / (k + 1.0)
+                if k == 2 and order_idx == 0 and side in ("Top", "Bottom"):
+                    frac = 0.28
+                if side in ("Top", "Bottom") and node.width > 0:
+                    inc_x = edge_port_info[e_idx]["bx"]
+                    wps = layout_res.edge_routes.get((diagram.edges[e_idx].source_id, diagram.edges[e_idx].target_id), [])
+                    if not wps or abs(wps[-1][0] - inc_x) < 0.05:
+                        cand_frac = (inc_x - (node.pin_x - node.width * 0.5)) / node.width
+                        slot_low = max(0.22, prev_frac + 0.18, (order_idx + 0.25) / (k + 1.0))
+                        slot_high = min(0.78, (order_idx + 1.65) / (k + 1.0))
+                        if slot_low <= cand_frac <= slot_high:
+                            frac = round(cand_frac, 4)
+                prev_frac = frac
                 port_name = f"{side}_in_{order_idx}"
                 edge_port_info[e_idx]["dst_port"] = port_name
                 if side == "Right":
@@ -331,6 +420,9 @@ def compile_flowchart_to_vsdx(
         shape_id_counter += 1
         node_to_shape_id[sub_id] = cont_id
 
+        sub_fill = sub.style.get("fill", palette.subgraph_fill) if sub.style else palette.subgraph_fill
+        sub_border = sub.style.get("stroke", palette.subgraph_border) if sub.style else palette.subgraph_border
+
         # Container bounding box
         cont_xml = build_2d_shape_xml(
             shape_id=cont_id,
@@ -341,8 +433,8 @@ def compile_flowchart_to_vsdx(
             height=sub_info.height,
             text="",
             shape_type="rectangle",
-            fill_color=palette.subgraph_fill,
-            line_color=palette.subgraph_border,
+            fill_color=sub_fill,
+            line_color=sub_border,
             line_weight_in=0.0208,
             line_pattern=2,  # Dashed boundary
             rounding_in=0.1,
@@ -354,27 +446,34 @@ def compile_flowchart_to_vsdx(
         # Header banner for title
         hdr_id = shape_id_counter
         shape_id_counter += 1
-        hdr_w = max(2.2, min(sub_info.width - 0.4, 5.0))
+        hdr_w = min(max(1.2, sub_info.width - 0.24), max(1.8, len(sub_info.title) * 0.085 + 0.45), 5.5)
         hdr_h = 0.35
         hdr_pin_x = sub_info.pin_x
         hdr_pin_y = sub_info.pin_y + sub_info.height / 2.0 - hdr_h / 2.0 - 0.05
+
+        hdr_text_col = (
+            sub.style.get("color")
+            if (sub.style and "color" in sub.style)
+            else ("#ffffff" if is_dark_color(sub_border) else palette.subgraph_text)
+        )
 
         hdr_xml = build_2d_shape_xml(
             shape_id=hdr_id,
             name=f"Header_{sub_id}",
             pin_x=hdr_pin_x,
             pin_y=hdr_pin_y,
-            width=hdr_w,
+            width=round(hdr_w, 4),
             height=hdr_h,
             text=sub_info.title,
             shape_type="rectangle",
-            fill_color=palette.subgraph_border,
-            line_color=palette.subgraph_border,
-            text_color="#ffffff" if is_dark_color(palette.subgraph_border) else palette.subgraph_text,
+            fill_color=sub_border,
+            line_color=sub_border,
+            text_color=hdr_text_col,
             line_weight_in=0.01,
             rounding_in=0.05,
             font_name=font_name,
             font_size_pt=9.0,
+            bold=True,
             has_connections=False,
         )
         shapes_xml_list.append(hdr_xml)
@@ -401,14 +500,38 @@ def compile_flowchart_to_vsdx(
             fill_col = palette.database_fill
             border_col = palette.database_border
             text_col = palette.default_text
-        elif node.shape == ShapeType.STADIUM:
+        elif node.shape in (ShapeType.STADIUM, ShapeType.CIRCLE, ShapeType.DOUBLE_CIRCLE):
             fill_col = palette.terminal_fill
             border_col = palette.terminal_border
             text_col = palette.default_text
 
-        # If font background is black or dark, font face MUST be white
-        if is_dark_color(fill_col):
+        # Resolve custom styles from class_defs merged with node.style
+        merged_style: Dict[str, str] = {}
+        for cname in node.classes:
+            if cname in diagram.class_defs:
+                merged_style.update(diagram.class_defs[cname])
+        if node.style:
+            merged_style.update(node.style)
+
+        if "fill" in merged_style:
+            fill_col = merged_style["fill"]
+        if "stroke" in merged_style:
+            border_col = merged_style["stroke"]
+        if "color" in merged_style:
+            text_col = merged_style["color"]
+        elif is_dark_color(fill_col):
             text_col = "#ffffff"
+
+        line_pat = 2 if "stroke-dasharray" in merged_style else 1
+
+        if node.shape == ShapeType.STADIUM:
+            rounding_val = round(l_node.height * 0.5, 4)
+        elif node.shape == ShapeType.ROUNDED:
+            rounding_val = 0.16
+        elif node.shape == ShapeType.RECTANGLE:
+            rounding_val = 0.05
+        else:
+            rounding_val = 0.0
 
         shape_xml = build_2d_shape_xml(
             shape_id=s_id,
@@ -423,14 +546,21 @@ def compile_flowchart_to_vsdx(
             line_color=border_col,
             text_color=text_col,
             line_weight_in=0.0208,
+            line_pattern=line_pat,
+            rounding_in=rounding_val,
             font_name=font_name,
             font_size_pt=10.0,
+            bold=node.bold,
             extra_connections=node_extra_connections.get(nid),
+            shadow=True,
         )
         shapes_xml_list.append(shape_xml)
 
     # 7. Render 1D Connectors & <Connects>
+    fb_idx = 0
     for idx, edge in enumerate(diagram.edges):
+        if edge.style == EdgeStyle.INVISIBLE:
+            continue
         if edge.source_id not in node_to_shape_id or edge.target_id not in node_to_shape_id:
             continue
 
@@ -441,11 +571,24 @@ def compile_flowchart_to_vsdx(
         dst_s_id = node_to_shape_id[edge.target_id]
 
         # Arrow markers and line pattern
-        begin_arrow = 13 if edge.arrow_start != ArrowType.NONE else 0
-        end_arrow = 13 if edge.arrow_end != ArrowType.NONE else 0
+        begin_arrow = ARROW_CODE_MAP.get(edge.arrow_start, 0)
+        end_arrow = ARROW_CODE_MAP.get(edge.arrow_end, 13)
         line_pat = 2 if edge.style == EdgeStyle.DOTTED else 1
         line_wt = 0.032 if edge.style == EdgeStyle.THICK else 0.018
         arr_sz = 3 if edge.style == EdgeStyle.THICK else 2
+
+        # Resolve link styles (-1 default or edge idx) merged with edge.link_style
+        merged_link_style: Dict[str, str] = {}
+        if -1 in diagram.link_styles:
+            merged_link_style.update(diagram.link_styles[-1])
+        if idx in diagram.link_styles:
+            merged_link_style.update(diagram.link_styles[idx])
+        if edge.link_style:
+            merged_link_style.update(edge.link_style)
+
+        conn_line_color = merged_link_style.get("stroke", palette.connector_line)
+        if "stroke-dasharray" in merged_link_style:
+            line_pat = 2
 
         info = edge_port_info.get(idx, {})
         bx = info.get("bx", 0.0)
@@ -457,6 +600,13 @@ def compile_flowchart_to_vsdx(
         src_part = info.get("src_part", 101)
         dst_part = info.get("dst_part", 100)
 
+        base_src = src_port.split("_")[0]
+        base_dst = dst_port.split("_")[0]
+        u_offset = 0.55
+        if base_src == base_dst == "Right" or (base_src and base_src == base_dst):
+            u_offset = round(0.55 + 0.35 * fb_idx, 4)
+            fb_idx += 1
+
         # Thread skip-level edges through intermediate dummy waypoints
         waypoints = layout_res.edge_routes.get((edge.source_id, edge.target_id))
 
@@ -467,7 +617,7 @@ def compile_flowchart_to_vsdx(
             end_x=ex,
             end_y=ey,
             label=edge.label or "",
-            line_color=palette.connector_line,
+            line_color=conn_line_color,
             line_weight_in=line_wt,
             line_pattern=line_pat,
             begin_arrow=begin_arrow,
@@ -483,6 +633,7 @@ def compile_flowchart_to_vsdx(
             dst_port=dst_port,
             routing_direction=diagram.direction,
             intermediate_waypoints=waypoints,
+            u_channel_offset=u_offset,
         )
         shapes_xml_list.append(conn_xml)
 

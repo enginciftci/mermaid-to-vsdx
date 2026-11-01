@@ -4,6 +4,7 @@ Guarantees 100% fidelity for Turkish characters (ç, ğ, ı, ö, ş, ü, İ, Ç,
 and safe formatting for Visio ShapeSheet and text elements.
 """
 
+import re
 import unicodedata
 from typing import Optional
 
@@ -39,29 +40,62 @@ def ensure_utf8(text: str) -> str:
     return unicodedata.normalize("NFC", text)
 
 
+def has_bold_markup(raw_text: str) -> bool:
+    """Returns True if raw_text contains <b>, <strong>, or **bold** markup."""
+    if not raw_text:
+        return False
+    if re.search(r"<\s*(b|strong)\b[^>]*>", raw_text, re.IGNORECASE):
+        return True
+    if re.search(r"\*\*[^*]+\*\*", raw_text):
+        return True
+    return False
+
+
 def clean_label_text(raw_text: str) -> str:
     """
     Clean up label text from Mermaid syntax:
-    - Strips surrounding quotes (single or double)
+    - Strips surrounding quotes (single or double) and Markdown string backticks ("`...`")
     - Unescapes common Mermaid HTML entities like <br/> to newlines
+    - Strips inline HTML formatting tags (<b>, <i>, <u>, <small>, <span>, etc.)
+    - Strips Markdown **bold** and *italic* markers
     - Strips leading and trailing whitespace while preserving internal formatting
     """
     if not raw_text:
         return ""
-    
+
     text = ensure_utf8(raw_text.strip())
-    
+
     # Strip quotes if wrapped
     if (text.startswith('"') and text.endswith('"')) or (text.startswith("'") and text.endswith("'")):
-        text = text[1:-1]
-        
-    # Replace HTML line breaks with standard newlines
-    text = text.replace("<br/>", "\n").replace("<br>", "\n").replace("<br />", "\n")
-    
+        text = text[1:-1].strip()
+
+    # Strip Markdown string backticks (`...`)
+    if text.startswith("`") and text.endswith("`") and len(text) >= 2:
+        text = text[1:-1].strip()
+
+    # Replace HTML line breaks (<br>, <br/>, <br />) case-insensitively with standard newlines
+    text = re.sub(r"<\s*br\s*/?\s*>", "\n", text, flags=re.IGNORECASE)
+
+    # Strip common inline HTML formatting tags (<b>, </b>, <i>, </i>, <u>, <strong>, <em>, <small>, <sub/>, <sup/>)
+    text = re.sub(r"</?\s*(b|i|u|strong|em|small|sub|sup|span|font)\b[^>]*>", "", text, flags=re.IGNORECASE)
+
+    # Strip Markdown bold/italic (**text** or __text__)
+    text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
+    text = re.sub(r"__([^_]+)__", r"\1", text)
+
     # Handle HTML entity escapes
-    text = text.replace("&quot;", '"').replace("&amp;", '&').replace("&lt;", '<').replace("&gt;", '>')
-    
-    return text
+    text = (
+        text.replace("&quot;", '"')
+        .replace("&#34;", '"')
+        .replace("&apos;", "'")
+        .replace("&#39;", "'")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&nbsp;", " ")
+    )
+
+    return text.strip()
 
 
 def sanitize_visio_formula_string(text: str) -> str:

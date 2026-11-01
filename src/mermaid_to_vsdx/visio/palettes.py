@@ -76,6 +76,14 @@ class PaletteTheme:
     note_border: str          # Sequence note border
     note_text: str            # Sequence note text
 
+    @property
+    def subgraph_title(self) -> str:
+        return self.subgraph_text
+
+    @property
+    def subgraph_header_fill(self) -> str:
+        return self.subgraph_border
+
 
 PALETTES: Dict[str, PaletteTheme] = {
     "Modern Corporate (Blue & Slate)": PaletteTheme(
@@ -92,7 +100,7 @@ PALETTES: Dict[str, PaletteTheme] = {
         database_border="RGB(168, 85, 247)",      # Purple 500
         subgraph_fill="RGB(248, 250, 252)",       # Slate 50
         subgraph_border="RGB(203, 213, 225)",     # Slate 300
-        subgraph_text="RGB(71, 85, 105)",         # Slate 600
+        subgraph_text="RGB(30, 41, 59)",          # Slate 800 (#1e293b) for strong contrast
         connector_line="RGB(71, 85, 105)",        # Slate 600
         connector_text="RGB(15, 23, 42)",         # Slate 900
         note_fill="RGB(254, 249, 195)",           # Pale Yellow
@@ -113,7 +121,7 @@ PALETTES: Dict[str, PaletteTheme] = {
         database_border="RGB(2, 132, 199)",       # Sky 600
         subgraph_fill="RGB(248, 250, 252)",
         subgraph_border="RGB(148, 163, 184)",
-        subgraph_text="RGB(51, 65, 85)",
+        subgraph_text="RGB(15, 23, 42)",          # Slate 900 (#0f172a) for strong contrast
         connector_line="RGB(15, 118, 110)",       # Deep Teal
         connector_text="RGB(19, 78, 74)",
         note_fill="RGB(254, 243, 199)",
@@ -134,7 +142,7 @@ PALETTES: Dict[str, PaletteTheme] = {
         database_border="RGB(168, 85, 247)",      # Purple 500
         subgraph_fill="RGB(255, 251, 235)",
         subgraph_border="RGB(253, 186, 116)",
-        subgraph_text="RGB(154, 52, 18)",
+        subgraph_text="RGB(76, 5, 25)",           # Rose 950 for strong contrast
         connector_line="RGB(159, 18, 57)",        # Rose 800
         connector_text="RGB(76, 5, 25)",
         note_fill="RGB(254, 240, 138)",
@@ -155,7 +163,7 @@ PALETTES: Dict[str, PaletteTheme] = {
         database_border="RGB(51, 65, 85)",
         subgraph_fill="RGB(255, 255, 255)",
         subgraph_border="RGB(148, 163, 184)",
-        subgraph_text="RGB(71, 85, 105)",
+        subgraph_text="RGB(15, 23, 42)",          # Slate 900 (#0f172a)
         connector_line="RGB(30, 41, 59)",         # Slate 800
         connector_text="RGB(15, 23, 42)",
         note_fill="RGB(254, 249, 195)",
@@ -182,6 +190,27 @@ PALETTES: Dict[str, PaletteTheme] = {
         note_fill="RGB(245, 245, 245)",            # Very Light Gray
         note_border="RGB(0, 0, 0)",                # Solid Black
         note_text="RGB(0, 0, 0)"                   # Solid Black
+    ),
+    "Executive Dark (Midnight & Cyan)": PaletteTheme(
+        name="Executive Dark",
+        background="RGB(15, 23, 42)",             # Slate 900 (#0f172a)
+        default_fill="RGB(30, 41, 59)",           # Slate 800 (#1e293b)
+        default_border="RGB(56, 189, 248)",       # Sky 400 (#38bdf8)
+        default_text="RGB(248, 250, 252)",        # Slate 50 (#f8fafc)
+        decision_fill="RGB(69, 26, 3)",           # Deep Amber (#451a03)
+        decision_border="RGB(251, 191, 36)",      # Amber 400 (#fbbf24)
+        terminal_fill="RGB(6, 78, 59)",           # Emerald 900 (#064e3b)
+        terminal_border="RGB(52, 211, 153)",      # Emerald 400 (#34d399)
+        database_fill="RGB(59, 7, 100)",          # Purple 950 (#3b0764)
+        database_border="RGB(192, 132, 252)",     # Purple 400 (#c084fc)
+        subgraph_fill="RGB(15, 23, 42)",          # Slate 900 (#0f172a)
+        subgraph_border="RGB(71, 85, 105)",       # Slate 600 (#475569)
+        subgraph_text="RGB(248, 250, 252)",       # Slate 50 (#f8fafc)
+        connector_line="RGB(148, 163, 184)",      # Slate 400 (#94a3b8)
+        connector_text="RGB(248, 250, 252)",      # Slate 50 (#f8fafc)
+        note_fill="RGB(66, 32, 6)",               # Warm Dark Amber
+        note_border="RGB(250, 204, 21)",          # Yellow 400
+        note_text="RGB(254, 249, 195)"            # Pale Yellow
     )
 }
 

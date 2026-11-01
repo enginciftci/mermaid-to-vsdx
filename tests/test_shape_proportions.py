@@ -4,9 +4,12 @@ for cylinder, asymmetric, parallelogram, and trapezoid flowchart shapes.
 """
 
 import os
+import sys
 import unittest
 import zipfile
 import xml.etree.ElementTree as ET
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
 from mermaid_to_vsdx.parser.ast_nodes import ShapeType
 from mermaid_to_vsdx.parser.flowchart_parser import FlowchartParser
@@ -61,14 +64,14 @@ class TestShapeProportionsAndGeometry(unittest.TestCase):
         self.assertIsNotNone(txt_piny_cell)
         self.assertEqual(txt_piny_cell[1], "Height*0.48")
 
-        # EllipticalArcTo row must have dynamic D formula
+        # EllipticalArcTo row must have dynamic D formula (major-to-minor axis ratio along C=0)
         geom_sec = shape_elem.find(".//{*}Section[@N='Geometry']")
         self.assertIsNotNone(geom_sec)
         d_found = False
         for r in geom_sec.findall("{*}Row"):
             if r.attrib.get("T") == "EllipticalArcTo":
                 for c in r.findall("{*}Cell"):
-                    if c.attrib.get("N") == "D" and c.attrib.get("F") == "(Height*0.14)/(Width*0.5)":
+                    if c.attrib.get("N") == "D" and c.attrib.get("F") == "(Width*0.5)/(Height*0.14)":
                         d_found = True
         self.assertTrue(d_found, "Dynamic eccentricity formula not found on cylinder EllipticalArcTo row")
 

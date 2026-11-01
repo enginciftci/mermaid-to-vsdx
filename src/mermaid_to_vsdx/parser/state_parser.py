@@ -4,8 +4,8 @@ Converts Mermaid text into a StateDiagram AST.
 """
 
 import re
-from typing import Dict, List, Optional
-from .ast_nodes import StateDiagram, StateNode, StateTransition, StateNodeType
+from typing import Dict, List, Optional, Set, Any
+from .ast_nodes import StateDiagram, StateNode, StateTransition, StateNodeType, StateNote
 from .base_parser import preprocess_lines, MermaidParseError
 from ..utils.unicode_helper import clean_label_text
 
@@ -14,7 +14,7 @@ class StateParser:
     """
     Parses Mermaid state diagrams into a structured StateDiagram AST.
     Supports [*] initial/terminal states, state descriptions, aliases,
-    <<choice>>, <<fork>>, <<join>>, and labeled transitions.
+    composite states, <<choice>>, <<fork>>, <<join>>, notes, and labeled transitions.
     """
 
     def parse(self, mermaid_code: str) -> StateDiagram:
@@ -36,19 +36,54 @@ class StateParser:
         states: Dict[str, StateNode] = {}
         transitions: List[StateTransition] = []
 
-        current_composite = None
-        notes: List[Any] = []
+        composite_stack: List[str] = []
+        top_level_states: Set[str] = set()
+        notes: List[StateNote] = []
         initial_counter = 1
         terminal_counter = 1
+
+        in_multiline_note: Optional[Tuple[str, str, List[str]]] = None
+
+        def _attach_to_composite(sid: str, force: bool = False):
+            if not composite_stack:
+                top_level_states.add(sid)
+                return
+            parent_cid = composite_stack[-1]
+            if sid == parent_cid:
+                return
+            if not force and sid in top_level_states:
+                return
+            top_level_states.discard(sid)
+            st_obj = states.get(sid)
+            if st_obj is None:
+                return
+            if st_obj.parent_id is None or force:
+                st_obj.parent_id = parent_cid
+            if sid not in states[parent_cid].children:
+                states[parent_cid].children.append(sid)
 
         for line_num, line in lines[1:]:
             line_str = line.strip()
             if not line_str or line_str.startswith("%%"):
                 continue
 
+            if in_multiline_note is not None:
+                if line_str.lower() == "end note":
+                    placement, st_id, buf = in_multiline_note
+                    notes.append(StateNote(
+                        placement=placement,
+                        state_id=st_id,
+                        text=clean_label_text(" ".join(buf)),
+                    ))
+                    in_multiline_note = None
+                else:
+                    in_multiline_note[2].append(line_str)
+                continue
+
             # Composite state closing: }
             if line_str == "}":
-                current_composite = None
+                if composite_stack:
+                    composite_stack.pop()
                 continue
 
             # Direction directive
@@ -58,10 +93,9 @@ class StateParser:
                 direction = "TD" if d == "TB" else d
                 continue
 
-            # Note line: note [left of|right of] StateId : text
+            # Single-line Note: note [left of|right of] StateId : text
             note_match = re.match(r'^note\s+(left\s+of|right\s+of)\s+([A-Za-z0-9_\-]+)\s*:\s*(.*)$', line_str, re.IGNORECASE)
             if note_match:
-                from .ast_nodes import StateNote
                 notes.append(StateNote(
                     placement=note_match.group(1).lower().strip(),
                     state_id=note_match.group(2).strip(),
@@ -69,8 +103,29 @@ class StateParser:
                 ))
                 continue
 
-            # Note blocks
+            # Multi-line Note opening: note [left of|right of] StateId
+            note_open_match = re.match(r'^note\s+(left\s+of|right\s+of)\s+([A-Za-z0-9_\-]+)$', line_str, re.IGNORECASE)
+            if note_open_match:
+                in_multiline_note = (
+                    note_open_match.group(1).lower().strip(),
+                    note_open_match.group(2).strip(),
+                    [],
+                )
+                continue
+
             if line_str.lower().startswith("note ") or line_str.lower() == "end note":
+                continue
+
+            # Composite state opening with alias: state "Label Here" as StateName {
+            comp_alias_match = re.match(r'^state\s+"([^"]+)"\s+as\s+([A-Za-z0-9_\-]+)\s*\{$', line_str, re.IGNORECASE)
+            if comp_alias_match:
+                lbl, cid = comp_alias_match.group(1), comp_alias_match.group(2).strip()
+                if cid not in states:
+                    states[cid] = StateNode(id=cid, label=clean_label_text(lbl), node_type=StateNodeType.STATE)
+                else:
+                    states[cid].label = clean_label_text(lbl)
+                _attach_to_composite(cid, force=True)
+                composite_stack.append(cid)
                 continue
 
             # Composite state opening: state StateName {
@@ -79,14 +134,19 @@ class StateParser:
                 cid = comp_match.group(1).strip()
                 if cid not in states:
                     states[cid] = StateNode(id=cid, label=clean_label_text(cid), node_type=StateNodeType.STATE)
-                current_composite = cid
+                _attach_to_composite(cid, force=True)
+                composite_stack.append(cid)
                 continue
 
             # State definition with alias: state "Label Here" as s1
-            alias_match = re.match(r'^state\s+"([^"]+)"\s+as\s+([A-Za-z0-9_\-]+)', line_str, re.IGNORECASE)
+            alias_match = re.match(r'^state\s+"([^"]+)"\s+as\s+([A-Za-z0-9_\-]+)$', line_str, re.IGNORECASE)
             if alias_match:
                 lbl, sid = alias_match.group(1), alias_match.group(2)
-                states[sid] = StateNode(id=sid, label=clean_label_text(lbl), node_type=StateNodeType.STATE)
+                if sid not in states:
+                    states[sid] = StateNode(id=sid, label=clean_label_text(lbl), node_type=StateNodeType.STATE)
+                else:
+                    states[sid].label = clean_label_text(lbl)
+                _attach_to_composite(sid, force=True)
                 continue
 
             # Special states: state s1 <<choice>>, <<fork>>, <<join>>
@@ -99,6 +159,7 @@ class StateParser:
                     else (StateNodeType.FORK if stype_str == "fork" else StateNodeType.JOIN)
                 )
                 states[sid] = StateNode(id=sid, label=clean_label_text(sid), node_type=stype)
+                _attach_to_composite(sid, force=True)
                 continue
 
             # State description: StateName : Description
@@ -109,6 +170,7 @@ class StateParser:
                     states[sid].description = clean_label_text(desc)
                 else:
                     states[sid] = StateNode(id=sid, label=clean_label_text(sid), description=clean_label_text(desc))
+                _attach_to_composite(sid, force=True)
                 continue
 
             # Transition: Source --> Target [: Event]
@@ -127,20 +189,26 @@ class StateParser:
                     src_id = f"__start_{initial_counter}__"
                     initial_counter += 1
                     states[src_id] = StateNode(id=src_id, label="", node_type=StateNodeType.INITIAL)
+                    _attach_to_composite(src_id, force=True)
                 else:
                     src_id = src_raw
-                    if src_id not in states:
+                    is_new_src = src_id not in states
+                    if is_new_src:
                         states[src_id] = StateNode(id=src_id, label=clean_label_text(src_id))
+                    _attach_to_composite(src_id, force=is_new_src)
 
                 # Resolve target
                 if dst_raw == "[*]":
                     dst_id = f"__end_{terminal_counter}__"
                     terminal_counter += 1
                     states[dst_id] = StateNode(id=dst_id, label="", node_type=StateNodeType.TERMINAL)
+                    _attach_to_composite(dst_id, force=True)
                 else:
                     dst_id = dst_raw
-                    if dst_id not in states:
+                    is_new_dst = dst_id not in states
+                    if is_new_dst:
                         states[dst_id] = StateNode(id=dst_id, label=clean_label_text(dst_id))
+                    _attach_to_composite(dst_id, force=is_new_dst)
 
                 transitions.append(StateTransition(
                     source_id=src_id,

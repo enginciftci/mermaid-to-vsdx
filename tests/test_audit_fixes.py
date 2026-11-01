@@ -99,7 +99,7 @@ class TestDrawingQualityFeatures(unittest.TestCase):
             end_y=4.0,
             is_dynamic=True,
         )
-        self.assertIn("<Cell N='ConFixedCode' V='1'/>", conn_xml)
+        self.assertIn("<Cell N='ConFixedCode' V='6'/>", conn_xml)
 
     # Item 4: Word wrapping prevents horizontal overflow
     def test_item4_word_wrapping(self):

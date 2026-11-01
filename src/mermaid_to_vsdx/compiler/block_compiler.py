@@ -3,11 +3,15 @@ Native headless compiler for Mermaid Block Diagrams.
 Transforms BlockDiagram AST into Open Packaging Conventions Visio XML.
 """
 
-import math
-from typing import Dict, List, Tuple, Optional, Any
-from ..parser.ast_nodes import BlockDiagram, BlockNode, BlockEdge, ShapeType
+from typing import Dict, List, Tuple
+from ..parser.ast_nodes import BlockDiagram, BlockNode, ShapeType
 from ..visio.palettes import PALETTES, DEFAULT_PALETTE_NAME, is_dark_color
-from .shapesheet import build_2d_shape_xml, build_1d_connector_xml
+from .shapesheet import (
+    build_2d_shape_xml,
+    build_1d_connector_xml,
+    build_connect_records,
+    distribute_shared_ports,
+)
 from .opc_package import package_vsdx
 
 
@@ -28,6 +32,14 @@ class BlockLayoutBox:
         self.h = h
         self.shape_id = shape_id
         self.children: List["BlockLayoutBox"] = []
+
+
+def _shift_descendants(block: BlockLayoutBox, dx: float, dy: float):
+    """Recursively shifts a BlockLayoutBox and all of its nested descendants by (dx, dy)."""
+    block.x += dx
+    block.y += dy
+    for child in block.children:
+        _shift_descendants(child, dx, dy)
 
 
 def _layout_grid(
@@ -116,13 +128,12 @@ def _layout_grid(
         counter += 1
         box = BlockLayoutBox(node=n, x=center_x, y=center_y, w=w, h=h, shape_id=box_id)
 
-        # Shift child boxes into absolute coordinates
+        # Shift child boxes and all nested descendants into absolute coordinates
         if child_boxes:
             c_top = center_y + h / 2.0 - 0.45
             c_left = center_x - w / 2.0 + 0.3
             for cb in child_boxes:
-                cb.x = c_left + cb.x
-                cb.y = c_top + cb.y
+                _shift_descendants(cb, c_left, c_top)
                 box.children.append(cb)
 
         boxes.append(box)
@@ -152,14 +163,13 @@ def compile_block_to_vsdx(
     page_width = max(8.5, round(grid_w + 2.4, 2))
     page_height = max(11.0, round(grid_h + 2.4, 2))
 
-    # Shift boxes down so start_y corresponds to page top
+    # Shift boxes and all nested descendants down so start_y corresponds to page top
     top_y = page_height - 1.2
     for b in boxes:
-        b.y += top_y
-        for cb in b.children:
-            cb.y += top_y
+        _shift_descendants(b, 0.0, top_y)
 
     shapes_xml_list: List[str] = []
+    connects_xml_list: List[str] = []
     shape_id_map: Dict[str, int] = {}
     box_coord_map: Dict[str, BlockLayoutBox] = {}
 
@@ -173,10 +183,89 @@ def compile_block_to_vsdx(
 
     collect_boxes(boxes)
 
+    # Pre-calculate port distribution across block edges
+    nodes_geom: Dict[str, Tuple[float, float, float, float]] = {
+        nid: (b.x, b.y, b.w, b.h) for nid, b in box_coord_map.items()
+    }
+    edge_pairs: List[Tuple[str, str]] = [
+        (e.source_id, e.target_id) for e in diagram.edges
+    ]
+    custom_ports: Dict[int, Tuple[float, float, float, float, str, str, int, int]] = {}
+    for idx, edge in enumerate(diagram.edges):
+        src_b = box_coord_map.get(edge.source_id)
+        dst_b = box_coord_map.get(edge.target_id)
+        if not src_b or not dst_b:
+            continue
+        dx = dst_b.x - src_b.x
+        dy = dst_b.y - src_b.y
+        if abs(dx) > abs(dy):
+            if dx > 0:
+                custom_ports[idx] = (
+                    round(src_b.x + src_b.w / 2.0, 4),
+                    round(src_b.y, 4),
+                    round(dst_b.x - dst_b.w / 2.0, 4),
+                    round(dst_b.y, 4),
+                    "Right",
+                    "Left",
+                    103,
+                    102,
+                )
+            else:
+                custom_ports[idx] = (
+                    round(src_b.x - src_b.w / 2.0, 4),
+                    round(src_b.y, 4),
+                    round(dst_b.x + dst_b.w / 2.0, 4),
+                    round(dst_b.y, 4),
+                    "Left",
+                    "Right",
+                    102,
+                    103,
+                )
+        else:
+            if dy > 0:
+                custom_ports[idx] = (
+                    round(src_b.x, 4),
+                    round(src_b.y + src_b.h / 2.0, 4),
+                    round(dst_b.x, 4),
+                    round(dst_b.y - dst_b.h / 2.0, 4),
+                    "Top",
+                    "Bottom",
+                    100,
+                    101,
+                )
+            else:
+                custom_ports[idx] = (
+                    round(src_b.x, 4),
+                    round(src_b.y - src_b.h / 2.0, 4),
+                    round(dst_b.x, 4),
+                    round(dst_b.y + dst_b.h / 2.0, 4),
+                    "Bottom",
+                    "Top",
+                    101,
+                    100,
+                )
+
+    distributed_routes, node_extra_connections = distribute_shared_ports(
+        nodes_geom=nodes_geom,
+        edge_pairs=edge_pairs,
+        direction="TD",
+        custom_ports=custom_ports,
+    )
+
     # 1. Render Composite Containers
     def render_containers(b_list: List[BlockLayoutBox]):
         for b in b_list:
             if b.children:
+                merged_style: Dict[str, str] = {}
+                for c in b.node.classes:
+                    if c in diagram.class_defs:
+                        merged_style.update(diagram.class_defs[c])
+                if b.node.style:
+                    merged_style.update(b.node.style)
+
+                cont_fill = merged_style.get("fill", palette.subgraph_fill)
+                cont_border = merged_style.get("stroke", palette.subgraph_border)
+
                 shapes_xml_list.append(build_2d_shape_xml(
                     shape_id=b.shape_id,
                     name=f"Container_{b.node.id}",
@@ -186,16 +275,18 @@ def compile_block_to_vsdx(
                     height=round(b.h, 4),
                     text="",
                     shape_type="rectangle",
-                    fill_color=palette.subgraph_fill,
-                    line_color=palette.subgraph_border,
+                    fill_color=cont_fill,
+                    line_color=cont_border,
                     line_weight_in=0.015,
                     line_pattern=2,
                     rounding_in=0.08,
-                    has_connections=False,
+                    is_container=True,
+                    has_connections=True,
+                    extra_connections=node_extra_connections.get(b.node.id),
                 ))
                 # Container title label
                 t_h = 0.28
-                t_w = max(1.2, len(b.node.label) * 0.10 + 0.3)
+                t_w = min(max(1.2, len(b.node.label) * 0.10 + 0.3), max(1.2, b.w - 0.3))
                 t_y = b.y + b.h / 2.0 - t_h / 2.0 - 0.05
                 t_x = b.x - b.w / 2.0 + t_w / 2.0 + 0.15
                 shapes_xml_list.append(build_2d_shape_xml(
@@ -208,7 +299,7 @@ def compile_block_to_vsdx(
                     text=b.node.label,
                     shape_type="rectangle",
                     fill_color="#f1f5f9",
-                    line_color=palette.subgraph_border,
+                    line_color=cont_border,
                     text_color=palette.subgraph_text,
                     line_weight_in=0.01,
                     font_name=font_name,
@@ -229,12 +320,36 @@ def compile_block_to_vsdx(
                 render_nodes(b.children)
                 continue
 
-            # Determine colors from style / class / palette
-            fill_col = b.node.style.get("fill", palette.default_fill)
-            stroke_col = b.node.style.get("stroke", palette.default_border)
-            text_col = b.node.style.get("color", "#ffffff" if is_dark_color(fill_col) else palette.default_text)
+            # Semantic palette fills when not overridden by custom style
+            default_fill = palette.default_fill
+            default_border = palette.default_border
+            if b.node.shape == ShapeType.CYLINDER:
+                default_fill = palette.database_fill
+                default_border = palette.database_border
+            elif b.node.shape == ShapeType.DIAMOND:
+                default_fill = palette.decision_fill
+                default_border = palette.decision_border
+            elif b.node.shape in (ShapeType.STADIUM, ShapeType.CIRCLE, ShapeType.DOUBLE_CIRCLE):
+                default_fill = palette.terminal_fill
+                default_border = palette.terminal_border
 
-            st = b.node.shape.value if hasattr(b.node.shape, 'value') else "rectangle"
+            # Merge class_defs with node.style
+            merged_style: Dict[str, str] = {}
+            for c in b.node.classes:
+                if c in diagram.class_defs:
+                    merged_style.update(diagram.class_defs[c])
+            if b.node.style:
+                merged_style.update(b.node.style)
+
+            fill_col = merged_style.get("fill", default_fill)
+            stroke_col = merged_style.get("stroke", default_border)
+            text_col = merged_style.get(
+                "color",
+                "#ffffff" if is_dark_color(fill_col) else palette.default_text,
+            )
+            line_pat = 2 if "stroke-dasharray" in merged_style else 1
+
+            st = b.node.shape.value if hasattr(b.node.shape, "value") else "rectangle"
 
             shapes_xml_list.append(build_2d_shape_xml(
                 shape_id=b.shape_id,
@@ -249,15 +364,18 @@ def compile_block_to_vsdx(
                 line_color=stroke_col,
                 text_color=text_col,
                 line_weight_in=0.018,
+                line_pattern=line_pat,
                 font_name=font_name,
                 font_size_pt=9.5,
+                extra_connections=node_extra_connections.get(b.node.id),
+                shadow=True,
             ))
 
     render_nodes(boxes)
 
-    # 3. Render Edges
+    # 3. Render Edges & <Connects>
     edge_counter = counter + 20000
-    for edge in diagram.edges:
+    for idx, edge in enumerate(diagram.edges):
         src_b = box_coord_map.get(edge.source_id)
         dst_b = box_coord_map.get(edge.target_id)
         if not src_b or not dst_b:
@@ -266,40 +384,7 @@ def compile_block_to_vsdx(
         e_id = edge_counter
         edge_counter += 1
 
-        dx = dst_b.x - src_b.x
-        dy = dst_b.y - src_b.y
-
-        # Determine edge connection ports
-        if abs(dx) > abs(dy):
-            if dx > 0:
-                bx = src_b.x + src_b.w / 2.0
-                by = src_b.y
-                ex = dst_b.x - dst_b.w / 2.0
-                ey = dst_b.y
-                src_port = "Right"
-                dst_port = "Left"
-            else:
-                bx = src_b.x - src_b.w / 2.0
-                by = src_b.y
-                ex = dst_b.x + dst_b.w / 2.0
-                ey = dst_b.y
-                src_port = "Left"
-                dst_port = "Right"
-        else:
-            if dy > 0:
-                bx = src_b.x
-                by = src_b.y + src_b.h / 2.0
-                ex = dst_b.x
-                ey = dst_b.y - dst_b.h / 2.0
-                src_port = "Top"
-                dst_port = "Bottom"
-            else:
-                bx = src_b.x
-                by = src_b.y - src_b.h / 2.0
-                ex = dst_b.x
-                ey = dst_b.y + dst_b.h / 2.0
-                src_port = "Bottom"
-                dst_port = "Top"
+        bx, by, ex, ey, src_port, dst_port, src_part, dst_part = distributed_routes[idx]
 
         shapes_xml_list.append(build_1d_connector_xml(
             connector_id=e_id,
@@ -321,10 +406,20 @@ def compile_block_to_vsdx(
             dst_port=dst_port,
         ))
 
+        connects_xml_list.append(build_connect_records(
+            connector_id=e_id,
+            source_shape_id=src_b.shape_id,
+            target_shape_id=dst_b.shape_id,
+            src_port=src_port,
+            dst_port=dst_port,
+            src_part=src_part,
+            dst_part=dst_part,
+        ))
+
     return package_vsdx(
         output_path=output_path,
         shapes_xml="\n".join(shapes_xml_list),
-        connects_xml="",
+        connects_xml="\n".join(connects_xml_list),
         page_width=page_width,
         page_height=page_height,
     )

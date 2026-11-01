@@ -6,7 +6,15 @@ Parses sequence diagrams into SequenceDiagram AST models.
 import re
 from typing import List, Optional
 from .ast_nodes import (
-    SequenceDiagram, Participant, Message, Note, MessageArrow, Activation, LoopBlock
+    SequenceDiagram,
+    Participant,
+    ParticipantBox,
+    Message,
+    Note,
+    MessageArrow,
+    Activation,
+    LoopBlock,
+    ElseBranch,
 )
 from .base_parser import MermaidParseError, preprocess_lines
 from ..utils.unicode_helper import clean_label_text, ensure_utf8
@@ -32,6 +40,7 @@ class SequenceParser:
         self.diagram = SequenceDiagram()
         self.participant_order: List[str] = []
         self.block_stack: List[LoopBlock] = []
+        self.active_box: Optional[ParticipantBox] = None
 
     def parse(self, text: str) -> SequenceDiagram:
         text = ensure_utf8(text)
@@ -46,6 +55,7 @@ class SequenceParser:
         self.diagram = SequenceDiagram()
         self.participant_order = []
         self.block_stack = []
+        self.active_box = None
 
         for line_num, line in raw_lines[1:]:
             self._parse_line(line, line_num)
@@ -62,13 +72,46 @@ class SequenceParser:
             return
 
         # Check autonumber
-        if line.lower() == "autonumber":
+        if re.match(r'^autonumber\b', line, re.IGNORECASE):
+            self.diagram.autonumber = True
+            return
+
+        # Check box start: box [color] [title]
+        m_box = re.match(r'^box\b(?:\s+(.*))?$', line, re.IGNORECASE)
+        if m_box:
+            rest = (m_box.group(1) or "").strip()
+            box_color = ""
+            box_title = ""
+            if rest:
+                m_rgb = re.match(r'^(rgba?\s*\([^)]+\)|#[0-9a-fA-F]{3,8}|transparent)\b\s*(.*)$', rest, re.IGNORECASE)
+                if m_rgb:
+                    box_color = m_rgb.group(1).strip()
+                    box_title = clean_label_text(m_rgb.group(2).strip())
+                else:
+                    parts = rest.split(None, 1)
+                    known_colors = {
+                        "aqua", "black", "blue", "fuchsia", "gray", "grey", "green",
+                        "lime", "maroon", "navy", "olive", "orange", "purple", "red",
+                        "silver", "teal", "white", "yellow", "lightblue", "lightgreen",
+                        "lightgray", "lightgrey", "pink", "cyan", "magenta"
+                    }
+                    if parts[0].lower() in known_colors:
+                        box_color = parts[0]
+                        box_title = clean_label_text(parts[1]) if len(parts) > 1 else ""
+                    else:
+                        box_title = clean_label_text(rest)
+            box_obj = ParticipantBox(title=box_title, color=box_color)
+            self.diagram.boxes.append(box_obj)
+            self.active_box = box_obj
+            return
+
+        if re.match(r'^destroy\s+', line, re.IGNORECASE):
             return
 
         # Check participant or actor
         # participant A as Alice [Turkish Text]
         # actor B as Bob
-        m_part = re.match(r'^(participant|actor)\s+([A-Za-z0-9_\-ğüşıöçĞÜŞİÖÇ]+)(\s+as\s+(.+))?$', line, re.IGNORECASE)
+        m_part = re.match(r'^(?:create\s+)?(participant|actor)\s+([A-Za-z0-9_\-ğüşıöçĞÜŞİÖÇ]+)(\s+as\s+(.+))?$', line, re.IGNORECASE)
         if m_part:
             is_actor = m_part.group(1).lower() == "actor"
             part_id = m_part.group(2)
@@ -96,10 +139,10 @@ class SequenceParser:
             placement = m_note.group(1).lower().strip()
             actors = [a.strip() for a in m_note.group(2).split(",")]
             note_text = clean_label_text(m_note.group(3))
-            
+
             for a in actors:
                 self._ensure_participant_exists(a)
-                
+
             self._add_item(Note(
                 placement=placement,
                 participant_ids=actors,
@@ -107,24 +150,33 @@ class SequenceParser:
             ))
             return
 
-        # Check Block start (loop, alt, opt, par, critical, rect)
-        m_block = re.match(r'^(loop|alt|opt|par|critical|rect)(\s+(.*))?$', line, re.IGNORECASE)
+        # Check Block start (loop, alt, opt, par, critical, break, rect)
+        m_block = re.match(r'^(loop|alt|opt|par|critical|break|rect)\b(?:\s+(.*))?$', line, re.IGNORECASE)
         if m_block:
             b_type = m_block.group(1).lower()
-            b_title = clean_label_text(m_block.group(3) or "")
+            b_title = clean_label_text(m_block.group(2) or "")
             blk = LoopBlock(title=b_title, block_type=b_type)
             self._add_item(blk)
             self.block_stack.append(blk)
             return
 
-        # Check Block end
+        # Check Block or Box end
         if re.match(r'^end\b', line, re.IGNORECASE):
             if self.block_stack:
                 self.block_stack.pop()
+            elif self.active_box is not None:
+                self.active_box = None
             return
 
-        # Check divider / else
-        if re.match(r'^else\b', line, re.IGNORECASE):
+        # Check divider / else / and / option inside block
+        m_else = re.match(r'^(else|and|option)\b(?:\s+(.*))?$', line, re.IGNORECASE)
+        if m_else:
+            if self.block_stack:
+                br_type = m_else.group(1).lower()
+                br_title = clean_label_text(m_else.group(2) or "")
+                self.block_stack[-1].else_branches.append(
+                    ElseBranch(title=br_title, branch_type=br_type)
+                )
             return
 
         # Check Message
@@ -174,11 +226,17 @@ class SequenceParser:
 
     def _add_item(self, item):
         if self.block_stack:
-            self.block_stack[-1].items.append(item)
+            active_loop = self.block_stack[-1]
+            if active_loop.else_branches:
+                active_loop.else_branches[-1].items.append(item)
+            else:
+                active_loop.items.append(item)
         else:
             self.diagram.items.append(item)
 
     def _add_participant(self, part_id: str, label: str, is_actor: bool = False):
+        if self.active_box is not None and part_id not in self.active_box.participant_ids:
+            self.active_box.participant_ids.append(part_id)
         for p in self.diagram.participants:
             if p.id == part_id:
                 p.label = label
